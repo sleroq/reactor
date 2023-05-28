@@ -257,7 +257,7 @@ func removeDuplicate[T string | int | int64](sliceList []T) []T {
 }
 
 func monitReactions(ctx context.Context, client *telegram.Client, db *sql.DB) error {
-	for range time.Tick(time.Minute * 5) {
+	for range time.Tick(time.Minute * 30) {
 		startDate := time.Now().Add(-12 * time.Hour)
 
 		chatRows, err := db.Query(`select * from chats`)
@@ -421,11 +421,11 @@ func forwardMessage(ctx context.Context, client *telegram.Client, chat Chat, mes
 	source := rand.NewSource(time.Now().UnixNano())
 	generator := rand.New(source)
 
-	channelId, err := strconv.ParseInt("CHANNEL_ID", 10, 64)
+	channelId, err := strconv.ParseInt(os.Getenv("CHANNEL_ID"), 10, 64)
 	if err != nil {
 		return errors.Wrap(err, "can't parse CHANNEL_ID")
 	}
-	channelAccessHash, err := strconv.ParseInt("CHANNEL_ACCESS_HASH", 10, 64)
+	channelAccessHash, err := strconv.ParseInt(os.Getenv("CHANNEL_ACCESS_HASH"), 10, 64)
 	if err != nil {
 		return errors.Wrap(err, "can't parse CHANNEL_ACCESS_HASH")
 	}
