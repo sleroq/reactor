@@ -281,7 +281,7 @@ func removeDuplicate[T string | int | int64](sliceList []T) []T {
 }
 
 func monitReactions(ctx context.Context, client *telegram.Client, db *sql.DB) error {
-	for range time.Tick(time.Minute * 5) {
+	for range time.Tick(time.Minute * 10) {
 		startDate := time.Now().Add(-12 * time.Hour)
 
 		chatRows, err := db.Query(`select * from chats`)
@@ -414,11 +414,14 @@ func monitReactions(ctx context.Context, client *telegram.Client, db *sql.DB) er
 
 				message := messagesGroup[messageId]
 				threshold := 2
-				if !message.withPhoto &&
-					message.FwdFromChannel == 0 &&
+				if message.FwdFromChannel == 0 &&
 					message.FwdFromUser == 0 {
-					threshold = 3
+					threshold = 300
 				}
+				fmt.Println(
+					len(totalPositive), "positive interactions",
+					message.Body,
+				)
 				if len(totalPositive) > threshold {
 					fmt.Println(
 						"forwarding message ", messageId,
