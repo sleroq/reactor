@@ -102,6 +102,15 @@ func getReactions(ctx context.Context, client *telegram.Client, chatId int64, ac
 			positive := true
 			if strings.Contains(emoticon, "👎") ||
 				strings.Contains(emoticon, "💩") ||
+				strings.Contains(emoticon, "😢") ||
+				strings.Contains(emoticon, "😨") ||
+				strings.Contains(emoticon, "🥴") ||
+				strings.Contains(emoticon, "🤬") ||
+				strings.Contains(emoticon, "😡") ||
+				strings.Contains(emoticon, "🖕") ||
+				strings.Contains(emoticon, "🤡") ||
+				strings.Contains(emoticon, "😢") ||
+				strings.Contains(emoticon, "️🤷") ||
 				strings.Contains(emoticon, "🤮") {
 				positive = false
 			}
@@ -211,6 +220,9 @@ func positiveRepliedUsers(db *sql.DB, messageId, chatId int64) (users []int64, e
 			&message.SentDate,
 			&message.ChatId,
 			&message.Forwarded,
+			&message.FwdFromUser,
+			&message.FwdFromChannel,
+			&message.withPhoto,
 			&message.ReplyTo,
 			&message.UserId,
 			&message.Body,
@@ -229,7 +241,19 @@ func positiveRepliedUsers(db *sql.DB, messageId, chatId int64) (users []int64, e
 		positive := false
 
 		if len(body) < 10 {
-			if res, err := regexp.MatchString("(?i)(ор|лол|кек|хех)", body); res {
+			if res, err := regexp.MatchString("(?i)(ор|лол|кек|хех|жиза|база)", body); res {
+				positive = true
+			} else if err != nil {
+				if res, err := regexp.MatchString("(?i)(секс|н.фега|вау|круто|абсолютно|абалдеть|ахнинеть|хорошо|красив|красав)", body); res {
+					positive = true
+				} else if err != nil {
+					return nil, errors.Wrap(err, "matching body")
+				}
+				return nil, errors.Wrap(err, "matching body")
+			}
+		}
+		if len(body) < 4 {
+			if res, err := regexp.MatchString("(?i)(жиз)", body); res {
 				positive = true
 			} else if err != nil {
 				return nil, errors.Wrap(err, "matching body")
@@ -257,7 +281,7 @@ func removeDuplicate[T string | int | int64](sliceList []T) []T {
 }
 
 func monitReactions(ctx context.Context, client *telegram.Client, db *sql.DB) error {
-	for range time.Tick(time.Minute * 30) {
+	for range time.Tick(time.Minute * 5) {
 		startDate := time.Now().Add(-12 * time.Hour)
 
 		chatRows, err := db.Query(`select * from chats`)
@@ -304,6 +328,9 @@ func monitReactions(ctx context.Context, client *telegram.Client, db *sql.DB) er
 					&message.SentDate,
 					&message.ChatId,
 					&message.Forwarded,
+					&message.FwdFromUser,
+					&message.FwdFromChannel,
+					&message.withPhoto,
 					&message.ReplyTo,
 					&message.UserId,
 					&message.Body,
@@ -321,8 +348,10 @@ func monitReactions(ctx context.Context, client *telegram.Client, db *sql.DB) er
 			}
 
 			group := make(map[int64][]Reaction)
+			messagesGroup := make(map[int64]Message)
 			for _, msg := range messages {
 				group[msg.Id] = []Reaction{}
+				messagesGroup[msg.Id] = msg
 			}
 
 			for _, r := range reactions {
@@ -383,7 +412,14 @@ func monitReactions(ctx context.Context, client *telegram.Client, db *sql.DB) er
 				totalPositive := append(positiveReactedUsers, positiveRepliedUsers...)
 				totalPositive = removeDuplicate(totalPositive)
 
-				if len(totalPositive) > 2 {
+				message := messagesGroup[messageId]
+				threshold := 2
+				if !message.withPhoto &&
+					message.FwdFromChannel == 0 &&
+					message.FwdFromUser == 0 {
+					threshold = 3
+				}
+				if len(totalPositive) > threshold {
 					fmt.Println(
 						"forwarding message ", messageId,
 						"with", len(totalPositive), "positive interactions",
@@ -485,7 +521,7 @@ func getSavedReactions(db *sql.DB, chatId int64, messageId int64) ([]Reaction, e
 			r.flags,
 			r.big
 		from reactions r,
-		     messages m
+			messages m
 		where r.messageId = m.id
 			and m.id = :messageId
 			and m.chatId = :chatId
@@ -750,8 +786,33 @@ func saveMessage(msg *tg.Message, chatId int64, db *sql.DB) error {
 	switch v := msg.FromID.(type) {
 	case *tg.PeerUser:
 		userId = v.UserID
+	case nil:
+		// Not saving this shit
+		return nil
 	default:
-		return fmt.Errorf("unexpected message sender type")
+		return fmt.Errorf("unexpected message sender type: %s", v)
+	}
+
+	var fwdFromUser int64
+	var fwdFromChannel int64
+
+	switch v := msg.FwdFrom.FromID.(type) {
+	case *tg.PeerUser:
+		fwdFromUser = v.UserID
+	case *tg.PeerChannel:
+		fwdFromChannel = v.ChannelID
+	case *tg.PeerChat:
+		break
+	case nil:
+		break
+	default:
+		return fmt.Errorf("unexpected forward peer sender type %s", v)
+	}
+
+	hasPhoto := false
+	switch msg.Media.(type) {
+	case *tg.MessageMediaPhoto:
+		hasPhoto = true
 	}
 
 	_, err := db.Exec(`
@@ -760,6 +821,9 @@ func saveMessage(msg *tg.Message, chatId int64, db *sql.DB) error {
 		    sentDate,
 		    chatId,
 		    replyTo,
+		    fwdFromUser,
+		    fwdFromChannel,
+		    withPhoto,
 			userId,
 		    body
 		) values (
@@ -767,10 +831,21 @@ func saveMessage(msg *tg.Message, chatId int64, db *sql.DB) error {
 			:sentDate,
 			:chatId,
 			:replyTo,
+		    :fwdFromUser,
+		    :fwdFromChannel,
+		    :withPhoto,
 		    :userId,
 		    :body
-		)
-	`, msg.ID, sentDate, chatId, msg.ReplyTo.ReplyToMsgID, userId, msg.Message)
+		)`,
+		msg.ID,
+		sentDate,
+		chatId,
+		msg.ReplyTo.ReplyToMsgID,
+		fwdFromUser,
+		fwdFromChannel,
+		hasPhoto,
+		userId,
+		msg.Message)
 	if err != nil {
 		return errors.Wrap(err, "saving message to database")
 	}
@@ -786,13 +861,13 @@ func saveChat(channel *tg.Channel, db *sql.DB) error {
 
 	_, err = db.Exec(`
 		insert or ignore into chats (
-		    id,
-		    accessHash,
-		    body
+			id,
+			accessHash,
+			body
 		) values (
-		    :id,
-		    :accessHash,
-		    :body
+			:id,
+			:accessHash,
+			:body
 		)
 	`, channel.ID, channel.AccessHash, body)
 	if err != nil {
@@ -811,14 +886,17 @@ type Chat struct {
 }
 
 type Message struct {
-	Id        int64
-	UpdatedAt time.Time
-	SentDate  time.Time
-	ChatId    int64
-	Forwarded bool
-	ReplyTo   int64
-	UserId    int64
-	Body      string
+	Id             int64
+	UpdatedAt      time.Time
+	SentDate       time.Time
+	ChatId         int64
+	Forwarded      bool
+	FwdFromUser    int64
+	FwdFromChannel int64
+	withPhoto      bool
+	ReplyTo        int64
+	UserId         int64
+	Body           string
 }
 
 type Reaction struct {
@@ -843,7 +921,7 @@ func setupDB() (*sql.DB, error) {
 			id integer not null primary key,
 			updatedAt datetime default (datetime('now')),
 			createdAt datetime default (datetime('now')),
-		    accessHash integer not null,
+			accessHash integer not null,
 			body text
 		);
 	`)
@@ -857,11 +935,14 @@ func setupDB() (*sql.DB, error) {
 			updatedAt datetime default (datetime('now')),
 			sentDate timestamp not null,
 			chatId integer not null,
-		    forwarded integer default 0,
-		    replyTo integer default 0,
-		    userId integer not null,
+			forwarded integer default 0,
+			fwdFromUser integer default 0,
+			fwdFromChannel integer default 0,
+			withPhoto integer not null,
+			replyTo integer default 0,
+			userId integer not null,
 			body text not null,
-		    foreign key(chatId) references chats(id)
+			foreign key(chatId) references chats(id)
 		);
 	`)
 	if err != nil {
@@ -875,9 +956,9 @@ func setupDB() (*sql.DB, error) {
 			positive integer not null,
 			emoticon text,
 			documentId integer,
-			SentDate datetime not null,
-			Flags integer not null,
-			Big integer not null,
+			sentDate datetime not null,
+			flags integer not null,
+			big integer not null,
 		    foreign key(messageId) references messages(id)
 		);
 	`)
