@@ -41,4 +41,4 @@ You can obtain your Telegram API ID and API hash from [here](https://my.telegram
 
 ## Licence
 
-This project is licensed under the GPL-3.0-or-later - see the [LICENSE](./LICENCE) file for details.
+This project is licensed under the GPL-3.0-or-later - see the [LICENSE](./LICENSE) file for details.
