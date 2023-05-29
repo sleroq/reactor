@@ -156,11 +156,11 @@ func positiveReplies(db *sql.DB, messageId, chatId int64) (map[int64]string, err
 			if res, err := regexp.MatchString("(?i)(ор|лол|кек|хех|жиза|база)", body); res {
 				positive = true
 			} else if err != nil {
-				if res, err := regexp.MatchString("(?i)(секс|н.фега|вау|круто|абсолютно|абалдеть|ахнинеть|хорошо|красив|красав)", body); res {
-					positive = true
-				} else if err != nil {
-					return nil, errors.Wrap(err, "matching body")
-				}
+				return nil, errors.Wrap(err, "matching body")
+			}
+			if res, err := regexp.MatchString("(?i)(секс|н.фега|вау|круто|абсолютно|абалдеть|ахнинеть|хорошо|красив|красав)", body); res {
+				positive = true
+			} else if err != nil {
 				return nil, errors.Wrap(err, "matching body")
 			}
 		}
@@ -255,6 +255,17 @@ func monitReactions(ctx context.Context, client *telegram.Client, db *sql.DB) er
 				for _, reaction := range usersReactions {
 					totalRating += reaction
 				}
+
+				stopWordCount := 0
+				words := strings.Split(message.Body, " ")
+				for _, word := range words {
+					if res, err := regexp.MatchString("(?i)(мяу)", word); res {
+						stopWordCount += 1
+					} else if err != nil {
+						return errors.Wrap(err, "matching stopWord")
+					}
+				}
+				totalRating += stopWordCount * -10
 
 				threshold := 24
 				if !message.WithPhoto &&
