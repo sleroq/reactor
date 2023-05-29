@@ -104,8 +104,8 @@ func getReactions(ctx context.Context, client *telegram.Client, chatId int64, ac
 			}
 
 			react := Reaction{
-				UserId:     userId,
-				MessageId:  int64(reactUpdate.MsgID),
+				UserID:     userId,
+				MessageID:  int64(reactUpdate.MsgID),
 				Positive:   positive,
 				Emoticon:   emoticon,
 				DocumentID: documentId,
@@ -128,11 +128,11 @@ func getMessagesReactions(ctx context.Context, client *telegram.Client, chat Cha
 		part, messages = Part(messages, 50)
 		var messageIds []int
 		for _, message := range part {
-			messageIds = append(messageIds, int(message.Id))
+			messageIds = append(messageIds, int(message.ID))
 		}
 
 		fmt.Println("requesting reactions for", len(messageIds), "messages")
-		someReactions, err := getReactions(ctx, client, chat.Id, chat.AccessHash, messageIds)
+		someReactions, err := getReactions(ctx, client, chat.ID, chat.AccessHash, messageIds)
 		if err != nil {
 			return nil, errors.Wrap(err, "getting reactions")
 		}
@@ -158,16 +158,16 @@ func positiveRepliedUsers(db *sql.DB, messageId, chatId int64) (users []int64, e
 	for msgRows.Next() {
 		var message Message
 		err = msgRows.Scan(
-			&message.Id,
+			&message.ID,
 			&message.UpdatedAt,
 			&message.SentDate,
-			&message.ChatId,
+			&message.ChatID,
 			&message.Forwarded,
 			&message.FwdFromUser,
 			&message.FwdFromChannel,
 			&message.withPhoto,
 			&message.ReplyTo,
-			&message.UserId,
+			&message.UserID,
 			&message.Body,
 		)
 		if err != nil {
@@ -203,8 +203,8 @@ func positiveRepliedUsers(db *sql.DB, messageId, chatId int64) (users []int64, e
 			}
 		}
 
-		if positive && !slices.Contains(usersReacted, reply.UserId) {
-			usersReacted = append(usersReacted, reply.UserId)
+		if positive && !slices.Contains(usersReacted, reply.UserID) {
+			usersReacted = append(usersReacted, reply.UserID)
 		}
 	}
 
@@ -221,7 +221,7 @@ func monitReactions(ctx context.Context, client *telegram.Client, db *sql.DB) er
 		}
 
 		for _, chat := range chats {
-			messages, err := getMessagesAfter(db, chat.Id, startDate)
+			messages, err := getMessagesAfter(db, chat.ID, startDate)
 			if err != nil {
 				return errors.Wrap(err, "getting messages from database")
 			}
@@ -234,16 +234,16 @@ func monitReactions(ctx context.Context, client *telegram.Client, db *sql.DB) er
 			group := make(map[int64][]Reaction)
 			messagesGroup := make(map[int64]Message)
 			for _, msg := range messages {
-				group[msg.Id] = []Reaction{}
-				messagesGroup[msg.Id] = msg
+				group[msg.ID] = []Reaction{}
+				messagesGroup[msg.ID] = msg
 			}
 
 			for _, r := range reactions {
-				group[r.MessageId] = append(group[r.MessageId], r)
+				group[r.MessageID] = append(group[r.MessageID], r)
 			}
 			// Update reactions per-message
 			for messageId, reacts := range group {
-				oldReactions, err := getSavedReactions(db, chat.Id, messageId)
+				oldReactions, err := getSavedReactions(db, chat.ID, messageId)
 				if err != nil {
 					return errors.Wrap(err, "getting saved reactions")
 				}
@@ -252,8 +252,8 @@ func monitReactions(ctx context.Context, client *telegram.Client, db *sql.DB) er
 				for _, react := range reacts {
 					hasNewReaction := slices.ContainsFunc(oldReactions, func(el Reaction) bool {
 						if el.SentDate.Equal(react.SentDate) &&
-							el.UserId == react.UserId &&
-							el.MessageId == react.MessageId {
+							el.UserID == react.UserID &&
+							el.MessageID == react.MessageID {
 							return true
 						}
 						return false
@@ -266,16 +266,16 @@ func monitReactions(ctx context.Context, client *telegram.Client, db *sql.DB) er
 						}
 					}
 
-					if react.Positive && !slices.Contains(positiveReactedUsers, react.UserId) {
-						positiveReactedUsers = append(positiveReactedUsers, react.UserId)
+					if react.Positive && !slices.Contains(positiveReactedUsers, react.UserID) {
+						positiveReactedUsers = append(positiveReactedUsers, react.UserID)
 					}
 				}
 
 				for _, oldReact := range oldReactions {
 					hasOldReaction := slices.ContainsFunc(reacts, func(el Reaction) bool {
 						if el.SentDate.Equal(oldReact.SentDate) &&
-							el.UserId == oldReact.UserId &&
-							el.MessageId == oldReact.MessageId {
+							el.UserID == oldReact.UserID &&
+							el.MessageID == oldReact.MessageID {
 							return true
 						}
 						return false
@@ -288,7 +288,7 @@ func monitReactions(ctx context.Context, client *telegram.Client, db *sql.DB) er
 					}
 				}
 
-				positiveRepliedUsers, err := positiveRepliedUsers(db, messageId, chat.Id)
+				positiveRepliedUsers, err := positiveRepliedUsers(db, messageId, chat.ID)
 				if err != nil {
 					return errors.Wrap(err, "getting positive replied users")
 				}
@@ -319,7 +319,7 @@ func monitReactions(ctx context.Context, client *telegram.Client, db *sql.DB) er
 						return errors.Wrap(err, "forwarding a message")
 					}
 
-					err = updateForwarded(db, chat.Id, messageId)
+					err = updateForwarded(db, chat.ID, messageId)
 					if err != nil {
 						return errors.Wrap(err, "updating forwarded status")
 					}
@@ -355,7 +355,7 @@ func forwardMessage(ctx context.Context, client *telegram.Client, chat Chat, mes
 			DropMediaCaptions: false,
 			Noforwards:        false,
 			FromPeer: &tg.InputPeerChannel{
-				ChannelID:  chat.Id,
+				ChannelID:  chat.ID,
 				AccessHash: chat.AccessHash,
 			},
 			ID:       []int{int(messageId)},

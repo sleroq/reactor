@@ -58,7 +58,7 @@ func saveMessage(msg *tg.Message, chatId int64, db *sql.DB) error {
 			userId,
 		    body
 		) values (
-		    :id,
+		    :ID,
 			:sentDate,
 			:chatId,
 			:replyTo,
@@ -96,17 +96,17 @@ func saveReaction(db *sql.DB, reaction Reaction) error {
 			flags,
 			big
 		) values (
-		    :messageId,
-		    :userId,
+		    :messageID,
+		    :userID,
 		    :positive,
 			:emoticon,
-		    :documentId,
+		    :documentID,
 			:sentDate,
 			:flags,
 			:big
 		)`,
-		reaction.MessageId,
-		reaction.UserId,
+		reaction.MessageID,
+		reaction.UserID,
 		reaction.Positive,
 		reaction.Emoticon,
 		reaction.DocumentID,
@@ -126,8 +126,8 @@ func updateForwarded(db *sql.DB, chatId int64, messageId int64) error {
 	_, err := db.Exec(`
 		update messages
 		set forwarded = 1
-		where chatId = :chatId
-			and id = :messageId
+		where chatId = :chatID
+			and id = :messageID
 	`, chatId, messageId)
 
 	return err
@@ -136,10 +136,10 @@ func updateForwarded(db *sql.DB, chatId int64, messageId int64) error {
 func deleteReaction(db *sql.DB, react Reaction) error {
 	_, err := db.Exec(`
 		delete from reactions
-		where messageId = :messageId
-			and userId = :userId
+		where messageId = :messageID
+			and userId = :userID
 			and sentDate = :SentDate
-	`, react.MessageId, react.UserId, react.SentDate)
+	`, react.MessageID, react.UserID, react.SentDate)
 
 	return err
 }
@@ -151,7 +151,7 @@ func getChats(db *sql.DB) ([]Chat, error) {
 		var chat Chat
 		var body string
 		err = chatRows.Scan(
-			&chat.Id,
+			&chat.ID,
 			&chat.UpdatedAt,
 			&chat.CreatedAt,
 			&chat.AccessHash,
@@ -185,16 +185,16 @@ func getMessagesAfter(db *sql.DB, chatID int64, date time.Time) ([]Message, erro
 	for msgRows.Next() {
 		var message Message
 		err = msgRows.Scan(
-			&message.Id,
+			&message.ID,
 			&message.UpdatedAt,
 			&message.SentDate,
-			&message.ChatId,
+			&message.ChatID,
 			&message.Forwarded,
 			&message.FwdFromUser,
 			&message.FwdFromChannel,
 			&message.withPhoto,
 			&message.ReplyTo,
-			&message.UserId,
+			&message.UserID,
 			&message.Body,
 		)
 		if err != nil {
@@ -221,8 +221,8 @@ func getSavedReactions(db *sql.DB, chatId int64, messageId int64) ([]Reaction, e
 		from reactions r,
 			messages m
 		where r.messageId = m.id
-			and m.id = :messageId
-			and m.chatId = :chatId
+			and m.id = :messageID
+			and m.chatId = :chatID
 	`, messageId, chatId)
 	if err != nil {
 		return nil, errors.Wrap(err, "querying reactions for message")
@@ -232,8 +232,8 @@ func getSavedReactions(db *sql.DB, chatId int64, messageId int64) ([]Reaction, e
 	for rows.Next() {
 		var reaction Reaction
 		err = rows.Scan(
-			&reaction.MessageId,
-			&reaction.UserId,
+			&reaction.MessageID,
+			&reaction.UserID,
 			&reaction.Positive,
 			&reaction.Emoticon,
 			&reaction.DocumentID,
@@ -263,7 +263,7 @@ func saveChat(channel *tg.Channel, db *sql.DB) error {
 			accessHash,
 			body
 		) values (
-			:id,
+			:ID,
 			:accessHash,
 			:body
 		)
@@ -276,7 +276,7 @@ func saveChat(channel *tg.Channel, db *sql.DB) error {
 }
 
 type Chat struct {
-	Id         int64
+	ID         int64
 	AccessHash int64
 	UpdatedAt  time.Time
 	CreatedAt  time.Time
@@ -284,22 +284,22 @@ type Chat struct {
 }
 
 type Message struct {
-	Id             int64
+	ID             int64
 	UpdatedAt      time.Time
 	SentDate       time.Time
-	ChatId         int64
+	ChatID         int64
 	Forwarded      bool
 	FwdFromUser    int64
 	FwdFromChannel int64
 	withPhoto      bool
 	ReplyTo        int64
-	UserId         int64
+	UserID         int64
 	Body           string
 }
 
 type Reaction struct {
-	UserId     int64
-	MessageId  int64
+	UserID     int64
+	MessageID  int64
 	Positive   bool
 	Emoticon   string
 	DocumentID int64
