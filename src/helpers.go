@@ -1,5 +1,7 @@
 package main
 
+import "fmt"
+
 func sessionFolder(phone string) string {
 	var out []rune
 	for _, r := range phone {
@@ -17,14 +19,154 @@ func Part[T any](slice []T, length int) (new []T, modified []T) {
 	return slice[:length], slice[length:]
 }
 
-func removeDuplicate[T string | int | int64](sliceList []T) []T {
-	allKeys := make(map[T]bool)
-	var list []T
-	for _, item := range sliceList {
-		if _, value := allKeys[item]; !value {
-			allKeys[item] = true
-			list = append(list, item)
-		}
+func reactionPositivity(emoticon string) int {
+	switch emoticon {
+	case "❤️":
+		return 9
+	case "👍":
+		return 8
+	case "🤯":
+		return 2
+	case "🥰":
+		return 9
+	case "😢":
+		return -6
+	case "🍓":
+		return 6
+	case "🔥":
+		return 9
+	case "❤‍🔥":
+		return 10
+	case "😭":
+		return -8
+	case "🤔":
+		return 0
+	case "🆒":
+		return 7
+	case "😎":
+		return 7
+	case "💯":
+		return 9
+	case "🤝":
+		return 8
+	case "😨":
+		return -7
+	case "😱":
+		return -8
+	case "😡":
+		return -9
+	case "🤬":
+		return -10
+	case "😁":
+		return 8
+	case "👏":
+		return 8
+	case "👻":
+		return 3
+	case "👎":
+		return -8
+	case "🎉":
+		return 9
+	case "🤩":
+		return 9
+	case "🤮":
+		return -10
+	case "💩":
+		return -5
+	case "🙏":
+		return 5
+	case "👌":
+		return 7
+	case "🕊":
+		return 6
+	case "🤡":
+		return -3
+	case "🥱":
+		return -4
+	case "🥴":
+		return -2
+	case "🐳":
+		return 5
+	case "🌚":
+		return -2
+	case "🌭":
+		return 4
+	case "😆":
+		return 9
+	case "⚡️":
+		return 3
+	case "🍌":
+		return 5
+	case "🏆":
+		return 9
+	case "💔":
+		return -10
+	case "🖕":
+		return -10
+	case "🤨":
+		return -1
+	case "😐":
+		return -1
+	case "🍾":
+		return 8
+	case "💋":
+		return 9
+	case "😈":
+		return -6
+	case "😴":
+		return -3
+	case "🤓":
+		return 6
+	case "👨‍💻":
+		return 6
+	case "👀":
+		return -1
+	case "🎃":
+		return -2
+	case "💘":
+		return 9
+	case "🙈":
+		return -2
+	case "😇":
+		return 8
+	case "✍️":
+		return -1
+	case "🤗":
+		return 9
+	case "🫡":
+		return -3
+	case "🎅":
+		return -2
+	case "🎄":
+		return -2
+	case "☃️":
+		return -2
+	case "💅":
+		return -1
+	case "🤪":
+		return -4
+	case "🗿":
+		return -1
+	case "🙉":
+		return -2
+	case "😘":
+		return 9
+	case "🦄":
+		return -2
+	case "💊":
+		return -4
+	case "🙊":
+		return -2
+	case "👾":
+		return -3
+	case "🤷‍♂️":
+		return -1
+	case "🤷‍":
+		return -1
+	case "️🤷‍♀️":
+		return -1
+	default:
+		fmt.Printf(`Warning: Unknown emoticon: "%s"`, emoticon)
+		return 1
 	}
-	return list
 }

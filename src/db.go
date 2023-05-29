@@ -54,7 +54,7 @@ func saveMessage(msg *tg.Message, chatId int64, db *sql.DB) error {
 		    replyTo,
 		    fwdFromUser,
 		    fwdFromChannel,
-		    withPhoto,
+		    WithPhoto,
 			userId,
 		    body
 		) values (
@@ -64,7 +64,7 @@ func saveMessage(msg *tg.Message, chatId int64, db *sql.DB) error {
 			:replyTo,
 		    :fwdFromUser,
 		    :fwdFromChannel,
-		    :withPhoto,
+		    :WithPhoto,
 		    :userId,
 		    :body
 		)`,
@@ -84,12 +84,11 @@ func saveMessage(msg *tg.Message, chatId int64, db *sql.DB) error {
 	return nil
 }
 
-func saveReaction(db *sql.DB, reaction Reaction) error {
+func saveReaction(db *sql.DB, reaction TelegramReaction) error {
 	_, err := db.Exec(`
 		insert into reactions (
 			messageId,
 			userId,
-			positive,
 			emoticon,
 			documentId,
 			sentDate,
@@ -98,7 +97,6 @@ func saveReaction(db *sql.DB, reaction Reaction) error {
 		) values (
 		    :messageID,
 		    :userID,
-		    :positive,
 			:emoticon,
 		    :documentID,
 			:sentDate,
@@ -107,7 +105,6 @@ func saveReaction(db *sql.DB, reaction Reaction) error {
 		)`,
 		reaction.MessageID,
 		reaction.UserID,
-		reaction.Positive,
 		reaction.Emoticon,
 		reaction.DocumentID,
 		reaction.SentDate,
@@ -171,20 +168,11 @@ func getChats(db *sql.DB) ([]Chat, error) {
 	return chats, nil
 }
 
-func getMessagesAfter(db *sql.DB, chatID int64, date time.Time) ([]Message, error) {
-	msgRows, err := db.Query(`
-				select * from messages
-				where SentDate > :startDate
-				and chatId = :chatID
-			`, date, chatID)
-	if err != nil {
-		return nil, errors.Wrap(err, "getting messages to check")
-	}
-
+func scanMessageRows(rows *sql.Rows) ([]Message, error) {
 	var messages []Message
-	for msgRows.Next() {
+	for rows.Next() {
 		var message Message
-		err = msgRows.Scan(
+		err := rows.Scan(
 			&message.ID,
 			&message.UpdatedAt,
 			&message.SentDate,
@@ -192,7 +180,7 @@ func getMessagesAfter(db *sql.DB, chatID int64, date time.Time) ([]Message, erro
 			&message.Forwarded,
 			&message.FwdFromUser,
 			&message.FwdFromChannel,
-			&message.withPhoto,
+			&message.WithPhoto,
 			&message.ReplyTo,
 			&message.UserID,
 			&message.Body,
@@ -207,12 +195,38 @@ func getMessagesAfter(db *sql.DB, chatID int64, date time.Time) ([]Message, erro
 	return messages, nil
 }
 
+func getReplies(db *sql.DB, chatID, replyTo int64) ([]Message, error) {
+	msgRows, err := db.Query(`
+		select *
+		from messages
+		where replyTo = :messageID
+			and chatId = :chatID
+	`, replyTo, chatID)
+	if err != nil {
+		return nil, errors.Wrap(err, "getting message replies")
+	}
+
+	return scanMessageRows(msgRows)
+}
+
+func getMessagesAfter(db *sql.DB, chatID int64, date time.Time) ([]Message, error) {
+	msgRows, err := db.Query(`
+				select * from messages
+				where SentDate > :startDate
+				and chatId = :chatID
+			`, date, chatID)
+	if err != nil {
+		return nil, errors.Wrap(err, "getting messages to check")
+	}
+
+	return scanMessageRows(msgRows)
+}
+
 func getSavedReactions(db *sql.DB, chatId int64, messageId int64) ([]Reaction, error) {
 	rows, err := db.Query(`
 		select 
 			r.messageId,
 			r.userId,
-			r.positive,
 			r.emoticon,
 			r.documentId,
 			r.sentDate,
@@ -234,7 +248,6 @@ func getSavedReactions(db *sql.DB, chatId int64, messageId int64) ([]Reaction, e
 		err = rows.Scan(
 			&reaction.MessageID,
 			&reaction.UserID,
-			&reaction.Positive,
 			&reaction.Emoticon,
 			&reaction.DocumentID,
 			&reaction.SentDate,
@@ -291,7 +304,7 @@ type Message struct {
 	Forwarded      bool
 	FwdFromUser    int64
 	FwdFromChannel int64
-	withPhoto      bool
+	WithPhoto      bool
 	ReplyTo        int64
 	UserID         int64
 	Body           string
@@ -300,7 +313,6 @@ type Message struct {
 type Reaction struct {
 	UserID     int64
 	MessageID  int64
-	Positive   bool
 	Emoticon   string
 	DocumentID int64
 	SentDate   time.Time
@@ -336,7 +348,7 @@ func setupDB() (*sql.DB, error) {
 			forwarded integer default 0,
 			fwdFromUser integer default 0,
 			fwdFromChannel integer default 0,
-			withPhoto integer not null,
+			WithPhoto integer not null,
 			replyTo integer default 0,
 			userId integer not null,
 			body text not null,
@@ -351,7 +363,6 @@ func setupDB() (*sql.DB, error) {
 		create table if not exists reactions (
 			messageId integer not null,
 			userId integer not null,
-			positive integer not null,
 			emoticon text,
 			documentId integer,
 			sentDate datetime not null,

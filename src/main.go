@@ -12,6 +12,7 @@ import (
 	"github.com/gotd/contrib/middleware/ratelimit"
 	"github.com/gotd/contrib/pebble"
 	"github.com/gotd/contrib/storage"
+	"github.com/gotd/td/bin"
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/telegram/auth"
 	"github.com/gotd/td/telegram/message/peer"
@@ -35,7 +36,18 @@ import (
 	"time"
 )
 
-func getReactions(ctx context.Context, client *telegram.Client, chatId int64, accessHash int64, messages []int) ([]Reaction, error) {
+type TelegramReaction struct {
+	UserID     int64
+	MessageID  int64
+	Emoticon   string
+	DocumentID int64
+	SentDate   time.Time
+	Flags      bin.Fields
+	Big        bool
+	Positivity int
+}
+
+func getReactions(ctx context.Context, client *telegram.Client, chatId int64, accessHash int64, messages []int) ([]TelegramReaction, error) {
 	update, err := client.API().MessagesGetMessagesReactions(ctx, &tg.MessagesGetMessagesReactionsRequest{
 		Peer: &tg.InputPeerChannel{
 			ChannelID:  chatId,
@@ -62,7 +74,7 @@ func getReactions(ctx context.Context, client *telegram.Client, chatId int64, ac
 		return nil, fmt.Errorf("unexpected update type: %s", v)
 	}
 
-	var reactions []Reaction
+	var reactions []TelegramReaction
 
 	for _, reactUpdate := range reactionUpdates {
 		for _, reaction := range reactUpdate.Reactions.RecentReactions {
@@ -87,28 +99,14 @@ func getReactions(ctx context.Context, client *telegram.Client, chatId int64, ac
 			}
 
 			sentDate := time.Unix(int64(reaction.Date), 0)
-			positive := true
-			if strings.Contains(emoticon, "👎") ||
-				strings.Contains(emoticon, "💩") ||
-				strings.Contains(emoticon, "😢") ||
-				strings.Contains(emoticon, "😨") ||
-				strings.Contains(emoticon, "🥴") ||
-				strings.Contains(emoticon, "🤬") ||
-				strings.Contains(emoticon, "😡") ||
-				strings.Contains(emoticon, "🖕") ||
-				strings.Contains(emoticon, "🤡") ||
-				strings.Contains(emoticon, "😢") ||
-				strings.Contains(emoticon, "️🤷") ||
-				strings.Contains(emoticon, "🤮") {
-				positive = false
-			}
+			positivity := reactionPositivity(emoticon)
 
-			react := Reaction{
+			react := TelegramReaction{
 				UserID:     userId,
 				MessageID:  int64(reactUpdate.MsgID),
-				Positive:   positive,
 				Emoticon:   emoticon,
 				DocumentID: documentId,
+				Positivity: positivity,
 				SentDate:   sentDate,
 				Flags:      reaction.Flags,
 				Big:        reaction.Big,
@@ -120,8 +118,8 @@ func getReactions(ctx context.Context, client *telegram.Client, chatId int64, ac
 	return reactions, nil
 }
 
-func getMessagesReactions(ctx context.Context, client *telegram.Client, chat Chat, messages []Message) ([]Reaction, error) {
-	var reactions []Reaction
+func getMessagesReactions(ctx context.Context, client *telegram.Client, chat Chat, messages []Message) ([]TelegramReaction, error) {
+	var reactions []TelegramReaction
 
 	for len(messages) > 0 {
 		var part []Message
@@ -143,42 +141,13 @@ func getMessagesReactions(ctx context.Context, client *telegram.Client, chat Cha
 	return reactions, nil
 }
 
-func positiveRepliedUsers(db *sql.DB, messageId, chatId int64) (users []int64, err error) {
-	msgRows, err := db.Query(`
-		select *
-		from messages
-		where replyTo = :messageId
-			and chatId = :chatId
-	`, messageId, chatId)
+func positiveReplies(db *sql.DB, messageId, chatId int64) (map[int64]string, error) {
+	messages, err := getReplies(db, chatId, messageId)
 	if err != nil {
-		return nil, errors.Wrap(err, "getting message replies")
+		return nil, errors.Wrap(err, "getting replies from database")
 	}
 
-	var messages []Message
-	for msgRows.Next() {
-		var message Message
-		err = msgRows.Scan(
-			&message.ID,
-			&message.UpdatedAt,
-			&message.SentDate,
-			&message.ChatID,
-			&message.Forwarded,
-			&message.FwdFromUser,
-			&message.FwdFromChannel,
-			&message.withPhoto,
-			&message.ReplyTo,
-			&message.UserID,
-			&message.Body,
-		)
-		if err != nil {
-			return nil, errors.Wrap(err, "scanning result")
-		}
-
-		messages = append(messages, message)
-	}
-
-	var usersReacted []int64
-
+	replies := make(map[int64]string)
 	for _, reply := range messages {
 		body := strings.TrimSpace(reply.Body)
 		positive := false
@@ -196,23 +165,23 @@ func positiveRepliedUsers(db *sql.DB, messageId, chatId int64) (users []int64, e
 			}
 		}
 		if len(body) < 4 {
-			if res, err := regexp.MatchString("(?i)(жиз)", body); res {
+			if res, err := regexp.MatchString("(?i)(жиз|👍|❤️)", body); res {
 				positive = true
 			} else if err != nil {
 				return nil, errors.Wrap(err, "matching body")
 			}
 		}
 
-		if positive && !slices.Contains(usersReacted, reply.UserID) {
-			usersReacted = append(usersReacted, reply.UserID)
+		if positive {
+			replies[reply.UserID] = body
 		}
 	}
 
-	return usersReacted, nil
+	return replies, nil
 }
 
 func monitReactions(ctx context.Context, client *telegram.Client, db *sql.DB) error {
-	for range time.Tick(time.Minute * 15) {
+	for range time.Tick(time.Minute * 5) {
 		startDate := time.Now().Add(-12 * time.Hour)
 
 		chats, err := getChats(db)
@@ -231,10 +200,10 @@ func monitReactions(ctx context.Context, client *telegram.Client, db *sql.DB) er
 				return errors.Wrap(err, "getting reactions for all messages")
 			}
 
-			group := make(map[int64][]Reaction)
+			group := make(map[int64][]TelegramReaction)
 			messagesGroup := make(map[int64]Message)
 			for _, msg := range messages {
-				group[msg.ID] = []Reaction{}
+				group[msg.ID] = []TelegramReaction{}
 				messagesGroup[msg.ID] = msg
 			}
 
@@ -243,75 +212,61 @@ func monitReactions(ctx context.Context, client *telegram.Client, db *sql.DB) er
 			}
 			// Update reactions per-message
 			for messageId, reacts := range group {
+				message := messagesGroup[messageId]
+
 				oldReactions, err := getSavedReactions(db, chat.ID, messageId)
 				if err != nil {
 					return errors.Wrap(err, "getting saved reactions")
 				}
 
-				var positiveReactedUsers []int64
-				for _, react := range reacts {
-					hasNewReaction := slices.ContainsFunc(oldReactions, func(el Reaction) bool {
-						if el.SentDate.Equal(react.SentDate) &&
-							el.UserID == react.UserID &&
-							el.MessageID == react.MessageID {
-							return true
-						}
-						return false
-					})
-
-					if !hasNewReaction {
-						err = saveReaction(db, react)
-						if err != nil {
-							return errors.Wrap(err, "saving new reaction")
-						}
-					}
-
-					if react.Positive && !slices.Contains(positiveReactedUsers, react.UserID) {
-						positiveReactedUsers = append(positiveReactedUsers, react.UserID)
-					}
-				}
-
-				for _, oldReact := range oldReactions {
-					hasOldReaction := slices.ContainsFunc(reacts, func(el Reaction) bool {
-						if el.SentDate.Equal(oldReact.SentDate) &&
-							el.UserID == oldReact.UserID &&
-							el.MessageID == oldReact.MessageID {
-							return true
-						}
-						return false
-					})
-					if !hasOldReaction {
-						err = deleteReaction(db, oldReact)
-						if err != nil {
-							return errors.Wrap(err, "deleting reaction")
-						}
-					}
-				}
-
-				positiveRepliedUsers, err := positiveRepliedUsers(db, messageId, chat.ID)
+				err = syncReactions(db, oldReactions, reacts)
 				if err != nil {
-					return errors.Wrap(err, "getting positive replied users")
+					return errors.Wrap(err, "syncing reactions")
 				}
-
-				totalPositive := append(positiveReactedUsers, positiveRepliedUsers...)
-				totalPositive = removeDuplicate(totalPositive)
-
-				message := messagesGroup[messageId]
 
 				// Ignore already forwarded messages
 				if message.Forwarded {
 					continue
 				}
 
-				threshold := 2
-				if message.FwdFromChannel == 0 &&
-					message.FwdFromUser == 0 {
-					threshold = 300
+				usersReactions := make(map[int64]int)
+				for _, reaction := range reacts {
+					if _, ok := usersReactions[reaction.UserID]; !ok {
+						usersReactions[reaction.UserID] = reaction.Positivity
+					}
 				}
-				if len(totalPositive) > threshold {
+
+				positiveRepliedUsers, err := positiveReplies(db, messageId, chat.ID)
+				if err != nil {
+					return errors.Wrap(err, "getting positive replied users")
+				}
+
+				for userID := range positiveRepliedUsers {
+					if _, ok := usersReactions[userID]; !ok {
+						// Replied to message - 8
+						usersReactions[userID] = 8
+					} else {
+						// Replied and reacted to message - 10
+						usersReactions[userID] = 10
+					}
+				}
+
+				totalRating := 0
+				for _, reaction := range usersReactions {
+					totalRating += reaction
+				}
+
+				threshold := 24
+				if !message.WithPhoto &&
+					message.FwdFromChannel == 0 &&
+					message.FwdFromUser == 0 {
+					threshold = 30
+				}
+
+				if totalRating > threshold {
 					fmt.Println(
-						"forwarding message ", messageId,
-						"with", len(totalPositive), "positive interactions",
+						"forwarding message", messageId,
+						"with", totalRating, "rating",
 					)
 
 					err = forwardMessage(ctx, client, chat, messageId)
@@ -323,7 +278,50 @@ func monitReactions(ctx context.Context, client *telegram.Client, db *sql.DB) er
 					if err != nil {
 						return errors.Wrap(err, "updating forwarded status")
 					}
+				} else {
+					fmt.Println(
+						"skipping message with", totalRating, "rating",
+					)
 				}
+			}
+		}
+	}
+
+	return nil
+}
+
+func syncReactions(db *sql.DB, old []Reaction, new []TelegramReaction) (err error) {
+	for _, react := range new {
+		hasNewReaction := slices.ContainsFunc(old, func(el Reaction) bool {
+			if el.SentDate.Equal(react.SentDate) &&
+				el.UserID == react.UserID &&
+				el.MessageID == react.MessageID {
+				return true
+			}
+			return false
+		})
+
+		if !hasNewReaction {
+			err = saveReaction(db, react)
+			if err != nil {
+				return errors.Wrap(err, "saving new reaction")
+			}
+		}
+	}
+
+	for _, oldReact := range old {
+		hasOldReaction := slices.ContainsFunc(new, func(el TelegramReaction) bool {
+			if el.SentDate.Equal(oldReact.SentDate) &&
+				el.UserID == oldReact.UserID &&
+				el.MessageID == oldReact.MessageID {
+				return true
+			}
+			return false
+		})
+		if !hasOldReaction {
+			err = deleteReaction(db, oldReact)
+			if err != nil {
+				return errors.Wrap(err, "deleting reaction")
 			}
 		}
 	}
