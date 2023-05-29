@@ -289,10 +289,6 @@ func monitReactions(ctx context.Context, client *telegram.Client, db *sql.DB) er
 					if err != nil {
 						return errors.Wrap(err, "updating forwarded status")
 					}
-				} else {
-					fmt.Println(
-						"skipping message with", totalRating, "rating",
-					)
 				}
 			}
 		}
