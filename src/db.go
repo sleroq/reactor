@@ -84,7 +84,7 @@ func saveMessage(msg *tg.Message, chatId int64, db *sql.DB) error {
 	return nil
 }
 
-func saveReaction(db *sql.DB, reaction TelegramReaction) error {
+func saveReaction(db *sql.DB, reaction Reaction) error {
 	_, err := db.Exec(`
 		insert into reactions (
 			messageId,
@@ -119,7 +119,7 @@ func saveReaction(db *sql.DB, reaction TelegramReaction) error {
 	return nil
 }
 
-func updateForwarded(db *sql.DB, chatId int64, messageId int64) error {
+func updateForwarded(db *sql.DB, chatId int64, messageId int) error {
 	_, err := db.Exec(`
 		update messages
 		set forwarded = 1
@@ -195,7 +195,7 @@ func scanMessageRows(rows *sql.Rows) ([]Message, error) {
 	return messages, nil
 }
 
-func getReplies(db *sql.DB, chatID, replyTo int64) ([]Message, error) {
+func getReplies(db *sql.DB, chatID int64, replyTo int) ([]Message, error) {
 	msgRows, err := db.Query(`
 		select *
 		from messages
@@ -222,7 +222,7 @@ func getMessagesAfter(db *sql.DB, chatID int64, date time.Time) ([]Message, erro
 	return scanMessageRows(msgRows)
 }
 
-func getSavedReactions(db *sql.DB, chatId int64, messageId int64) ([]Reaction, error) {
+func getSavedReactions(db *sql.DB, chatId int64, messageId int) ([]Reaction, error) {
 	rows, err := db.Query(`
 		select 
 			r.messageId,
@@ -297,7 +297,7 @@ type Chat struct {
 }
 
 type Message struct {
-	ID             int64
+	ID             int
 	UpdatedAt      time.Time
 	SentDate       time.Time
 	ChatID         int64
@@ -312,7 +312,7 @@ type Message struct {
 
 type Reaction struct {
 	UserID     int64
-	MessageID  int64
+	MessageID  int
 	Emoticon   string
 	DocumentID int64
 	SentDate   time.Time

@@ -281,7 +281,7 @@ func matchMultiple(s string, items []string, words bool) (bool, error) {
 	return result, nil
 }
 
-func positiveReplies(db *sql.DB, messageId, chatId int64) (map[int64]string, error) {
+func positiveReplies(db *sql.DB, messageId int, chatId int64) (map[int64]string, error) {
 	messages, err := getReplies(db, chatId, messageId)
 	if err != nil {
 		return nil, errors.Wrap(err, "getting replies from database")
@@ -307,7 +307,7 @@ func positiveReplies(db *sql.DB, messageId, chatId int64) (map[int64]string, err
 			}
 		}
 
-		if res, err := regexp.MatchString(`(?i)^сука+`, body); res {
+		if res, err := regexp.MatchString(`(?i)^сукаa+`, body); res {
 			positive = true
 		} else if err != nil {
 			return nil, errors.Wrap(err, "matching body")
