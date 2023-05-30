@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"flag"
 	"fmt"
 	pebbledb "github.com/cockroachdb/pebble"
@@ -15,6 +16,7 @@ import (
 	"github.com/gotd/td/bin"
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/telegram/auth"
+	"github.com/gotd/td/telegram/message"
 	"github.com/gotd/td/telegram/message/peer"
 	"github.com/gotd/td/telegram/query"
 	"github.com/gotd/td/telegram/updates"
@@ -47,6 +49,51 @@ type TelegramReaction struct {
 	Positivity int
 }
 
+func forwardMessage(ctx context.Context, client *telegram.Client, chat Chat, messageId int64) error {
+	source := rand.NewSource(time.Now().UnixNano())
+	generator := rand.New(source)
+
+	channelId, err := strconv.ParseInt(os.Getenv("CHANNEL_ID"), 10, 64)
+	if err != nil {
+		return errors.Wrap(err, "can't parse CHANNEL_ID")
+	}
+	channelAccessHash, err := strconv.ParseInt(os.Getenv("CHANNEL_ACCESS_HASH"), 10, 64)
+	if err != nil {
+		return errors.Wrap(err, "can't parse CHANNEL_ACCESS_HASH")
+	}
+
+	_, err = client.API().MessagesForwardMessages(
+		ctx,
+		&tg.MessagesForwardMessagesRequest{
+			Flags:             0,
+			Silent:            false,
+			Background:        false,
+			WithMyScore:       false,
+			DropAuthor:        true,
+			DropMediaCaptions: false,
+			Noforwards:        false,
+			FromPeer: &tg.InputPeerChannel{
+				ChannelID:  chat.ID,
+				AccessHash: chat.AccessHash,
+			},
+			ID:       []int{int(messageId)},
+			RandomID: []int64{generator.Int63()},
+			ToPeer: &tg.InputPeerChannel{
+				ChannelID:  channelId,
+				AccessHash: channelAccessHash,
+			},
+			TopMsgID:     0,
+			ScheduleDate: 0,
+			SendAs:       nil,
+		},
+	)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func getReactions(ctx context.Context, client *telegram.Client, chatId int64, accessHash int64, messages []int) ([]TelegramReaction, error) {
 	update, err := client.API().MessagesGetMessagesReactions(ctx, &tg.MessagesGetMessagesReactionsRequest{
 		Peer: &tg.InputPeerChannel{
@@ -73,6 +120,9 @@ func getReactions(ctx context.Context, client *telegram.Client, chatId int64, ac
 	default:
 		return nil, fmt.Errorf("unexpected update type: %s", v)
 	}
+
+	text, err := json.Marshal(update)
+	fmt.Println(string(text))
 
 	var reactions []TelegramReaction
 
@@ -141,47 +191,47 @@ func getMessagesReactions(ctx context.Context, client *telegram.Client, chat Cha
 	return reactions, nil
 }
 
-func positiveReplies(db *sql.DB, messageId, chatId int64) (map[int64]string, error) {
-	messages, err := getReplies(db, chatId, messageId)
-	if err != nil {
-		return nil, errors.Wrap(err, "getting replies from database")
-	}
-
-	replies := make(map[int64]string)
-	for _, reply := range messages {
-		body := strings.TrimSpace(reply.Body)
-		positive := false
-
-		if len(body) < 10 {
-			if res, err := regexp.MatchString("(?i)(ор|лол|кек|хех|жиза|база)", body); res {
-				positive = true
-			} else if err != nil {
-				return nil, errors.Wrap(err, "matching body")
+func syncReactions(db *sql.DB, old []Reaction, new []TelegramReaction) (err error) {
+	for _, react := range new {
+		hasNewReaction := slices.ContainsFunc(old, func(el Reaction) bool {
+			if el.SentDate.Equal(react.SentDate) &&
+				el.UserID == react.UserID &&
+				el.MessageID == react.MessageID {
+				return true
 			}
-			if res, err := regexp.MatchString("(?i)(секс|н.фега|вау|круто|абсолютно|абалдеть|ахнинеть|хорошо|красив|красав)", body); res {
-				positive = true
-			} else if err != nil {
-				return nil, errors.Wrap(err, "matching body")
-			}
-		}
-		if len(body) < 4 {
-			if res, err := regexp.MatchString("(?i)(жиз|👍|❤️)", body); res {
-				positive = true
-			} else if err != nil {
-				return nil, errors.Wrap(err, "matching body")
-			}
-		}
+			return false
+		})
 
-		if positive {
-			replies[reply.UserID] = body
+		if !hasNewReaction {
+			err = saveReaction(db, react)
+			if err != nil {
+				return errors.Wrap(err, "saving new reaction")
+			}
 		}
 	}
 
-	return replies, nil
+	for _, oldReact := range old {
+		hasOldReaction := slices.ContainsFunc(new, func(el TelegramReaction) bool {
+			if el.SentDate.Equal(oldReact.SentDate) &&
+				el.UserID == oldReact.UserID &&
+				el.MessageID == oldReact.MessageID {
+				return true
+			}
+			return false
+		})
+		if !hasOldReaction {
+			err = deleteReaction(db, oldReact)
+			if err != nil {
+				return errors.Wrap(err, "deleting reaction")
+			}
+		}
+	}
+
+	return nil
 }
 
 func monitReactions(ctx context.Context, client *telegram.Client, db *sql.DB) error {
-	for range time.Tick(time.Minute * 5) {
+	for range time.Tick(time.Minute * 10) {
 		startDate := time.Now().Add(-12 * time.Hour)
 
 		chats, err := getChats(db)
@@ -271,7 +321,7 @@ func monitReactions(ctx context.Context, client *telegram.Client, db *sql.DB) er
 				if !message.WithPhoto &&
 					message.FwdFromChannel == 0 &&
 					message.FwdFromUser == 0 {
-					threshold = 30
+					threshold = 34
 				}
 
 				if totalRating > threshold {
@@ -292,90 +342,6 @@ func monitReactions(ctx context.Context, client *telegram.Client, db *sql.DB) er
 				}
 			}
 		}
-	}
-
-	return nil
-}
-
-func syncReactions(db *sql.DB, old []Reaction, new []TelegramReaction) (err error) {
-	for _, react := range new {
-		hasNewReaction := slices.ContainsFunc(old, func(el Reaction) bool {
-			if el.SentDate.Equal(react.SentDate) &&
-				el.UserID == react.UserID &&
-				el.MessageID == react.MessageID {
-				return true
-			}
-			return false
-		})
-
-		if !hasNewReaction {
-			err = saveReaction(db, react)
-			if err != nil {
-				return errors.Wrap(err, "saving new reaction")
-			}
-		}
-	}
-
-	for _, oldReact := range old {
-		hasOldReaction := slices.ContainsFunc(new, func(el TelegramReaction) bool {
-			if el.SentDate.Equal(oldReact.SentDate) &&
-				el.UserID == oldReact.UserID &&
-				el.MessageID == oldReact.MessageID {
-				return true
-			}
-			return false
-		})
-		if !hasOldReaction {
-			err = deleteReaction(db, oldReact)
-			if err != nil {
-				return errors.Wrap(err, "deleting reaction")
-			}
-		}
-	}
-
-	return nil
-}
-
-func forwardMessage(ctx context.Context, client *telegram.Client, chat Chat, messageId int64) error {
-	source := rand.NewSource(time.Now().UnixNano())
-	generator := rand.New(source)
-
-	channelId, err := strconv.ParseInt(os.Getenv("CHANNEL_ID"), 10, 64)
-	if err != nil {
-		return errors.Wrap(err, "can't parse CHANNEL_ID")
-	}
-	channelAccessHash, err := strconv.ParseInt(os.Getenv("CHANNEL_ACCESS_HASH"), 10, 64)
-	if err != nil {
-		return errors.Wrap(err, "can't parse CHANNEL_ACCESS_HASH")
-	}
-
-	_, err = client.API().MessagesForwardMessages(
-		ctx,
-		&tg.MessagesForwardMessagesRequest{
-			Flags:             0,
-			Silent:            false,
-			Background:        false,
-			WithMyScore:       false,
-			DropAuthor:        true,
-			DropMediaCaptions: false,
-			Noforwards:        false,
-			FromPeer: &tg.InputPeerChannel{
-				ChannelID:  chat.ID,
-				AccessHash: chat.AccessHash,
-			},
-			ID:       []int{int(messageId)},
-			RandomID: []int64{generator.Int63()},
-			ToPeer: &tg.InputPeerChannel{
-				ChannelID:  channelId,
-				AccessHash: channelAccessHash,
-			},
-			TopMsgID:     0,
-			ScheduleDate: 0,
-			SendAs:       nil,
-		},
-	)
-	if err != nil {
-		return err
 	}
 
 	return nil
@@ -501,6 +467,9 @@ func run(ctx context.Context) error {
 	}
 	defer botdb.Close()
 
+	// Helper for sending messages.
+	sender := message.NewSender(api)
+
 	// Registering handler for new private messages in chats.
 	dispatcher.OnNewChannelMessage(func(ctx context.Context, e tg.Entities, u *tg.UpdateNewChannelMessage) error {
 		msg, ok := u.Message.(*tg.Message)
@@ -536,6 +505,18 @@ func run(ctx context.Context) error {
 		if err != nil {
 			fmt.Println(err)
 			return errors.Wrap(err, "saving message")
+		}
+
+		if strings.HasPrefix(msg.Message, "/r") {
+			if msg.ReplyTo.ReplyToMsgID != 0 {
+				// TODO
+				_, err := sender.Reply(e, u).Text(ctx, msg.Message)
+				if err != nil {
+					fmt.Println(err)
+					return errors.Wrap(err, "sending reply")
+				}
+			}
+
 		}
 
 		fmt.Printf("%s: %s\n", p, msg.Message)
