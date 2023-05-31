@@ -182,6 +182,7 @@ func reactionPositivity(emoticon string) int {
 
 var GOOD_WORDS = []string{
 	"лол",
+	"мы",
 	"кек",
 	"хех",
 	"жиза",

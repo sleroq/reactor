@@ -186,13 +186,36 @@ func scanMessageRows(rows *sql.Rows) ([]Message, error) {
 			&message.Body,
 		)
 		if err != nil {
-			return nil, errors.Wrap(err, "scanning result")
+			return nil, errors.Wrap(err, "scanning message row")
 		}
 
 		messages = append(messages, message)
 	}
 
 	return messages, nil
+}
+
+func getMessage(db *sql.DB, chatID int64, msgID int) (Message, error) {
+	msgRows, err := db.Query(`
+		select *
+		from messages
+		where id = :messageID
+			and chatId = :chatID
+	`, msgID, chatID)
+	if err != nil {
+		return Message{}, errors.Wrap(err, "getting message replies")
+	}
+
+	messages, err := scanMessageRows(msgRows)
+	if err != nil {
+		return Message{}, errors.Wrap(err, "scanning message rows")
+	}
+
+	if len(messages) > 0 {
+		return messages[0], nil
+	}
+
+	return Message{}, fmt.Errorf("not found")
 }
 
 func getReplies(db *sql.DB, chatID int64, replyTo int) ([]Message, error) {
