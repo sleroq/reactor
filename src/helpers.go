@@ -187,12 +187,12 @@ var GOOD_WORDS = []string{
 	"хех",
 	"жиза",
 	"жиз",
+	"умер",
 	"база",
 	"секс",
 	"нифега",
 	"ржу",
 	"ахаха",
-	"кек",
 	"лмао",
 	"хаха",
 	"ого",
@@ -209,6 +209,7 @@ var GOOD_WORDS = []string{
 	"супер",
 	"молодец",
 	"лучшая",
+	"разрывная",
 	"лучший",
 	"угар",
 	"гыгы",
@@ -309,6 +310,11 @@ func positiveReplies(db *sql.DB, messageId int, chatId int64) (map[int64]string,
 		}
 
 		if res, err := regexp.MatchString(`(?i)^сукаa+`, body); res {
+			positive = true
+		} else if err != nil {
+			return nil, errors.Wrap(err, "matching body")
+		}
+		if res, err := regexp.MatchString(`(?i)^я`, body); res {
 			positive = true
 		} else if err != nil {
 			return nil, errors.Wrap(err, "matching body")
