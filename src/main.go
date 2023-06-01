@@ -325,11 +325,11 @@ func monitReactions(ctx context.Context, client *tg.Client, db *sql.DB) error {
 					return errors.Wrap(err, "rating message")
 				}
 
-				threshold := 24
+				threshold := 23
 				if !msg.WithPhoto &&
 					msg.FwdFromChannel == 0 &&
 					msg.FwdFromUser == 0 {
-					threshold = 34
+					threshold = 31
 				}
 
 				if totalRating > threshold {
