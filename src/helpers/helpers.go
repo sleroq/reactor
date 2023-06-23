@@ -1,34 +1,18 @@
-package main
+package helpers
 
 import (
-	"database/sql"
 	"fmt"
 	"github.com/go-faster/errors"
+	"github.com/gotd/td/tg"
+	"github.com/sleroq/memeq/src/db"
 	"regexp"
 	"strings"
+	"time"
 )
 
-func sessionFolder(phone string) string {
-	var out []rune
-	for _, r := range phone {
-		if r >= '0' && r <= '9' {
-			out = append(out, r)
-		}
-	}
-	return "phone-" + string(out)
-}
-
-// Part function splits slice on specified position
-func Part[T any](slice []T, length int) (new []T, modified []T) {
-	if length > len(slice) {
-		length = len(slice)
-	}
-	return slice[:length], slice[length:]
-}
-
-// reactionPositivity returns rating on scale from -10 to 10
+// ReactionPositivity returns rating on scale from -10 to 10
 // for any of Telegram reaction emojis
-func reactionPositivity(emoticon string) int {
+func ReactionPositivity(emoticon string) int {
 	switch emoticon {
 	case "❤":
 		return 9
@@ -283,12 +267,7 @@ func matchMultiple(s string, items []string, words bool) (bool, error) {
 	return result, nil
 }
 
-func positiveReplies(db *sql.DB, messageId int, chatId int64) (map[int64]string, error) {
-	messages, err := getReplies(db, chatId, messageId)
-	if err != nil {
-		return nil, errors.Wrap(err, "getting replies from database")
-	}
-
+func PositiveReplies(messages []db.Message) (map[int64]string, error) {
 	replies := make(map[int64]string)
 	for _, reply := range messages {
 		body := strings.TrimSpace(reply.Body)
@@ -336,4 +315,44 @@ func positiveReplies(db *sql.DB, messageId int, chatId int64) (map[int64]string,
 	}
 
 	return replies, nil
+}
+
+func AsReactions(tgReactions []tg.MessagePeerReaction, messageID int) ([]db.Reaction, error) {
+	var reactions []db.Reaction
+	for _, tgReaction := range tgReactions {
+		sentDate := time.Unix(int64(tgReaction.Date), 0)
+		var userID int64
+		switch p := tgReaction.PeerID.(type) {
+		case *tg.PeerUser:
+			userID = p.UserID
+		default:
+			return nil, fmt.Errorf(`unexpected peer type: "%s"`, p)
+		}
+
+		var emoticon string
+		var documentId int64
+
+		switch r := tgReaction.Reaction.(type) {
+		case *tg.ReactionEmoji:
+			emoticon = r.GetEmoticon()
+		case *tg.ReactionCustomEmoji:
+			documentId = r.GetDocumentID()
+		default:
+			return nil, fmt.Errorf("unexpected reaction type: %s", tgReaction.String())
+		}
+
+		reaction := db.Reaction{
+			UserID:     userID,
+			MessageID:  messageID,
+			Emoticon:   emoticon,
+			DocumentID: documentId,
+			SentDate:   sentDate,
+			Flags:      tgReaction.Flags,
+			Big:        tgReaction.Big,
+		}
+
+		reactions = append(reactions, reaction)
+	}
+
+	return reactions, nil
 }
