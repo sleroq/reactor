@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"flag"
 	"fmt"
 	pebbledb "github.com/cockroachdb/pebble"
@@ -14,387 +13,35 @@ import (
 	"github.com/gotd/contrib/storage"
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/telegram/auth"
-	"github.com/gotd/td/telegram/message"
 	"github.com/gotd/td/telegram/message/peer"
 	"github.com/gotd/td/telegram/query"
 	"github.com/gotd/td/telegram/updates"
 	"github.com/gotd/td/tg"
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/sleroq/memeq/src/bot"
+	"github.com/sleroq/memeq/src/db"
+	monitor "github.com/sleroq/memeq/src/monitor"
 	"go.etcd.io/bbolt"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"golang.org/x/exp/slices"
 	"golang.org/x/time/rate"
 	lj "gopkg.in/natefinch/lumberjack.v2"
-	"math/rand"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
 )
 
-func forwardMessage(ctx context.Context, client *tg.Client, chat Chat, messageId int) error {
-	source := rand.NewSource(time.Now().UnixNano())
-	generator := rand.New(source)
-
-	channelId, err := strconv.ParseInt(os.Getenv("CHANNEL_ID"), 10, 64)
-	if err != nil {
-		return errors.Wrap(err, "can't parse CHANNEL_ID")
-	}
-	channelAccessHash, err := strconv.ParseInt(os.Getenv("CHANNEL_ACCESS_HASH"), 10, 64)
-	if err != nil {
-		return errors.Wrap(err, "can't parse CHANNEL_ACCESS_HASH")
-	}
-
-	_, err = client.MessagesForwardMessages(
-		ctx,
-		&tg.MessagesForwardMessagesRequest{
-			Flags:             0,
-			Silent:            false,
-			Background:        false,
-			WithMyScore:       false,
-			DropAuthor:        true,
-			DropMediaCaptions: false,
-			Noforwards:        false,
-			FromPeer: &tg.InputPeerChannel{
-				ChannelID:  chat.ID,
-				AccessHash: chat.AccessHash,
-			},
-			ID:       []int{messageId},
-			RandomID: []int64{generator.Int63()},
-			ToPeer: &tg.InputPeerChannel{
-				ChannelID:  channelId,
-				AccessHash: channelAccessHash,
-			},
-			TopMsgID:     0,
-			ScheduleDate: 0,
-			SendAs:       nil,
-		},
-	)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func getReactions(ctx context.Context, client *tg.Client, chatId int64, accessHash int64, messages []int) ([]*tg.UpdateMessageReactions, error) {
-	update, err := client.MessagesGetMessagesReactions(ctx, &tg.MessagesGetMessagesReactionsRequest{
-		Peer: &tg.InputPeerChannel{
-			ChannelID:  chatId,
-			AccessHash: accessHash,
-		},
-		ID: messages,
-	})
-	if err != nil {
-		return nil, errors.Wrap(err, "getting reactions update for message")
-	}
-
-	var reactionUpdates []*tg.UpdateMessageReactions
-	switch v := update.(type) {
-	case *tg.Updates:
-		for _, reactionUpdate := range v.Updates {
-			switch u := reactionUpdate.(type) {
-			case *tg.UpdateMessageReactions:
-				reactionUpdates = append(reactionUpdates, u)
-			default:
-				return nil, fmt.Errorf("unexpected update type: %s", u)
-			}
-		}
-	default:
-		return nil, fmt.Errorf("unexpected update type: %s", v)
-	}
-
-	return reactionUpdates, nil
-}
-
-func getMessagesReactions(ctx context.Context, client *tg.Client, chat Chat, messages []Message) (
-	reactions []*tg.UpdateMessageReactions,
-	err error,
-) {
-	for len(messages) > 0 {
-		var part []Message
-		part, messages = Part(messages, 90)
-		var messageIds []int
-		for _, msg := range part {
-			messageIds = append(messageIds, msg.ID)
-		}
-
-		fmt.Println("requesting reactions for", len(messageIds), "messages")
-		someReactions, err := getReactions(ctx, client, chat.ID, chat.AccessHash, messageIds)
-		if err != nil {
-			return nil, errors.Wrap(err, "getting reactions")
-		}
-
-		reactions = append(reactions, someReactions...)
-	}
-
-	return reactions, nil
-}
-
-func asReactions(tgReactions []tg.MessagePeerReaction, messageID int) ([]Reaction, error) {
-	var reactions []Reaction
-	for _, tgReaction := range tgReactions {
-		sentDate := time.Unix(int64(tgReaction.Date), 0)
-		var userID int64
-		switch p := tgReaction.PeerID.(type) {
-		case *tg.PeerUser:
-			userID = p.UserID
-		default:
-			return nil, fmt.Errorf(`unexpected peer type: "%s"`, p)
-		}
-
-		var emoticon string
-		var documentId int64
-
-		switch r := tgReaction.Reaction.(type) {
-		case *tg.ReactionEmoji:
-			emoticon = r.GetEmoticon()
-		case *tg.ReactionCustomEmoji:
-			documentId = r.GetDocumentID()
-		default:
-			return nil, fmt.Errorf("unexpected reaction type: %s", tgReaction.String())
-		}
-
-		reaction := Reaction{
-			UserID:     userID,
-			MessageID:  messageID,
-			Emoticon:   emoticon,
-			DocumentID: documentId,
-			SentDate:   sentDate,
-			Flags:      tgReaction.Flags,
-			Big:        tgReaction.Big,
-		}
-
-		reactions = append(reactions, reaction)
-	}
-
-	return reactions, nil
-}
-
-func syncPeerReactions(db *sql.DB, old, new []Reaction) (err error) {
-	for _, react := range new {
-		hasNewReaction := slices.ContainsFunc(old, func(el Reaction) bool {
-			if el.SentDate.Equal(react.SentDate) && el.UserID == react.UserID {
-				return true
-			}
-			return false
-		})
-
-		if !hasNewReaction {
-			err = saveReaction(db, react)
-			if err != nil {
-				return errors.Wrap(err, "saving new reaction")
-			}
+func sessionFolder(phone string) string {
+	var out []rune
+	for _, r := range phone {
+		if r >= '0' && r <= '9' {
+			out = append(out, r)
 		}
 	}
-
-	for _, oldReact := range old {
-		hasOldReaction := slices.ContainsFunc(new, func(el Reaction) bool {
-			if el.SentDate.Equal(oldReact.SentDate) && el.UserID == oldReact.UserID {
-				return true
-			}
-			return false
-		})
-		if !hasOldReaction {
-			err = deleteReaction(db, oldReact)
-			if err != nil {
-				return errors.Wrap(err, "deleting reaction")
-			}
-		}
-	}
-
-	return nil
-}
-
-func getReactionsList(ctx context.Context, client *tg.Client, msg Message, accessHash int64) (*tg.MessagesMessageReactionsList, error) {
-	fmt.Println("Requesting reactions list")
-	reactionsList, err := client.MessagesGetMessageReactionsList(
-		ctx,
-		&tg.MessagesGetMessageReactionsListRequest{
-			Flags: 0,
-			Peer: &tg.InputPeerChannel{
-				ChannelID:  msg.ChatID,
-				AccessHash: accessHash,
-			},
-			ID:       msg.ID,
-			Reaction: nil,
-			Offset:   "",
-			Limit:    100,
-		})
-	if err != nil {
-		return nil, err
-	}
-
-	return reactionsList, nil
-}
-
-func syncReactions(db *sql.DB, ctx context.Context, client *tg.Client, new tg.MessageReactions, msg Message, accessHash int64) (reactions []Reaction, err error) {
-	old, err := getSavedReactions(db, msg.ChatID, msg.ID)
-	if err != nil {
-		return nil, errors.Wrap(err, "getting saved reactions")
-	}
-
-	totalReactions := 0
-	for _, result := range new.Results {
-		totalReactions += result.Count
-	}
-
-	// Check if we can trust "recent reactions"
-	// If so - save recent reactions
-	if len(new.RecentReactions) == totalReactions {
-		reactions, err = asReactions(new.RecentReactions, msg.ID)
-		if err != nil {
-			return nil, errors.Wrap(err, "converting reaction")
-		}
-
-		err = syncPeerReactions(db, old, reactions)
-		if err != nil {
-			return nil, errors.Wrap(err, "syncing recent reactions")
-		}
-	} else {
-		// If we can't use recent reaction, we have to request reactionsList
-		reactionsList, err := getReactionsList(ctx, client, msg, accessHash)
-		if err != nil {
-			return nil, errors.Wrap(err, "getting reactions list from telegram")
-		}
-
-		reactions, err = asReactions(reactionsList.Reactions, msg.ID)
-		if err != nil {
-			return nil, errors.Wrap(err, "converting reaction")
-		}
-
-		err = syncPeerReactions(db, old, reactions)
-		if err != nil {
-			return nil, errors.Wrap(err, "syncing reactions reactions")
-		}
-	}
-
-	return reactions, nil
-}
-
-func monitReactions(ctx context.Context, client *tg.Client, db *sql.DB) error {
-	for range time.Tick(time.Minute * 20) {
-		startDate := time.Now().Add(-12 * time.Hour)
-
-		chats, err := getChats(db)
-		if err != nil {
-			return errors.Wrap(err, "getting chats from database")
-		}
-
-		for _, chat := range chats {
-			messages, err := getMessagesAfter(db, chat.ID, startDate)
-			if err != nil {
-				return errors.Wrap(err, "getting messages from database")
-			}
-
-			reactionUpdates, err := getMessagesReactions(ctx, client, chat, messages)
-			if err != nil {
-				return errors.Wrap(err, "getting reactions for all messages")
-			}
-
-			reactionsGroup := make(map[int]tg.MessageReactions)
-			messagesGroup := make(map[int]Message)
-			for _, msg := range messages {
-				messagesGroup[msg.ID] = msg
-			}
-
-			for _, update := range reactionUpdates {
-				reactionsGroup[update.MsgID] = update.Reactions
-			}
-
-			// Update reactions per-message
-			for messageId, msgReactions := range reactionsGroup {
-				msg := messagesGroup[messageId]
-
-				reactions, err := syncReactions(db, ctx, client, msgReactions, msg, chat.AccessHash)
-				if err != nil {
-					return errors.Wrap(err, "syncing reactions")
-				}
-
-				// Ignore already forwarded messages
-				if msg.Forwarded {
-					continue
-				}
-
-				totalRating, err := rateMessage(db, reactions, msg)
-				if err != nil {
-					return errors.Wrap(err, "rating message")
-				}
-
-				threshold := 23
-				if !msg.WithPhoto &&
-					msg.FwdFromChannel == 0 &&
-					msg.FwdFromUser == 0 {
-					threshold = 31
-				}
-
-				if totalRating > threshold {
-					fmt.Println(
-						"forwarding msg", messageId,
-						"with", totalRating, "rating",
-					)
-
-					err = forwardMessage(ctx, client, chat, messageId)
-					if err != nil {
-						return errors.Wrap(err, "forwarding a msg")
-					}
-
-					err = updateForwarded(db, chat.ID, messageId)
-					if err != nil {
-						return errors.Wrap(err, "updating forwarded status")
-					}
-				}
-			}
-		}
-	}
-
-	return nil
-}
-
-func rateMessage(db *sql.DB, reactions []Reaction, msg Message) (int, error) {
-	usersReactions := make(map[int64]int)
-	for _, reaction := range reactions {
-		if _, ok := usersReactions[reaction.UserID]; !ok {
-			usersReactions[reaction.UserID] = reactionPositivity(reaction.Emoticon)
-		}
-	}
-
-	positiveRepliedUsers, err := positiveReplies(db, msg.ID, msg.ChatID)
-	if err != nil {
-		return 0, errors.Wrap(err, "getting positive replied users")
-	}
-
-	for userID := range positiveRepliedUsers {
-		if _, ok := usersReactions[userID]; !ok {
-			// Replied to msg - 8
-			usersReactions[userID] = 8
-		} else {
-			// Replied and reacted to msg - 10
-			usersReactions[userID] = 10
-		}
-	}
-
-	totalRating := 0
-	for _, reaction := range usersReactions {
-		totalRating += reaction
-	}
-
-	stopWordCount := 0
-	words := strings.Split(msg.Body, " ")
-	for _, word := range words {
-		if res, err := regexp.MatchString("(?i)(мяу)", word); res {
-			stopWordCount += 1
-		} else if err != nil {
-			return 0, errors.Wrap(err, "matching stopWord")
-		}
-	}
-	totalRating += stopWordCount * -10
-
-	return totalRating, nil
+	return "phone-" + string(out)
 }
 
 func run(ctx context.Context) error {
@@ -433,6 +80,15 @@ func run(ctx context.Context) error {
 		return errors.New("can't parse CHAT_ID")
 	}
 
+	channelId, err := strconv.ParseInt(os.Getenv("CHANNEL_ID"), 10, 64)
+	if err != nil {
+		return errors.Wrap(err, "can't parse CHANNEL_ID")
+	}
+	channelAccessHash, err := strconv.ParseInt(os.Getenv("CHANNEL_ACCESS_HASH"), 10, 64)
+	if err != nil {
+		return errors.Wrap(err, "can't parse CHANNEL_ACCESS_HASH")
+	}
+
 	fmt.Printf("Storing session in %s, logs in %s\n", sessionDir, logFilePath)
 
 	// Setting up logging to file with rotation.
@@ -457,11 +113,11 @@ func run(ctx context.Context) error {
 		Path: filepath.Join(sessionDir, "session.json"),
 	}
 	// Peer storage, for resolve caching and short updates handling.
-	db, err := pebbledb.Open(filepath.Join(sessionDir, "peers.pebble.db"), &pebbledb.Options{})
+	cacheDB, err := pebbledb.Open(filepath.Join(sessionDir, "peers.pebble.db"), &pebbledb.Options{})
 	if err != nil {
 		return errors.Wrap(err, "create pebble storage")
 	}
-	peerDB := pebble.NewPeerStorage(db)
+	peerDB := pebble.NewPeerStorage(cacheDB)
 	lg.Info("Storage", zap.String("path", sessionDir))
 
 	// Setting up client.
@@ -511,11 +167,36 @@ func run(ctx context.Context) error {
 	_ = resolver
 
 	// Setting up persistent storage for chats and messages
-	botdb, err := setupDB()
+	botDB, err := db.SetupDB()
 	if err != nil {
 		return errors.Wrap(err, "setting up the database")
 	}
-	defer botdb.Close()
+	defer botDB.Close()
+
+	bot := bot.New(ctx, api)
+
+	// TODO: It's all wrong
+	inputChannel := tg.InputPeerChannel{
+		ChannelID: selectedChatId,
+	}
+
+	destinationChannel := tg.InputPeerChannel{
+		ChannelID:  channelId,
+		AccessHash: channelAccessHash,
+	}
+
+	monitorOptions := monitor.Options{
+		Thresholds: monitor.Thresholds{
+			Text:    31,
+			Photo:   23,
+			Forward: 23,
+		},
+		Chats: monitor.Chats{
+			Sources:      []tg.InputPeerClass{&inputChannel},
+			Destinations: []tg.InputPeerClass{&destinationChannel},
+		},
+	}
+	monit := monitor.New(monitorOptions, botDB, bot)
 
 	// Registering handler for new private messages in chats.
 	dispatcher.OnNewChannelMessage(func(ctx context.Context, e tg.Entities, u *tg.UpdateNewChannelMessage) error {
@@ -543,12 +224,12 @@ func run(ctx context.Context) error {
 			return nil
 		}
 
-		err = saveChat(p.Channel, botdb)
+		err = db.SaveChat(p.Channel, botDB)
 		if err != nil {
 			return errors.Wrap(err, "saving chat")
 		}
 
-		err = saveMessage(msg, p.Channel.ID, botdb)
+		err = db.SaveMessage(msg, p.Channel.ID, botDB)
 		if err != nil {
 			fmt.Println(err)
 			return errors.Wrap(err, "saving message")
@@ -556,8 +237,7 @@ func run(ctx context.Context) error {
 
 		if strings.HasPrefix(msg.Message, "/r") {
 			if msg.ReplyTo.ReplyToMsgID != 0 {
-
-				err = replyMessageRating(ctx, api, botdb, e, u, msg.ReplyTo.ReplyToMsgID, p.Channel)
+				err = monit.ReplyMessageRating(e, u, msg.ReplyTo.ReplyToMsgID, p.Channel)
 				if err != nil {
 					fmt.Println(err)
 					return errors.Wrap(err, "replying with message rating")
@@ -574,7 +254,7 @@ func run(ctx context.Context) error {
 
 	return waiter.Run(ctx, func(ctx context.Context) error {
 		go func() {
-			err := monitReactions(ctx, api, botdb)
+			err := monit.Start(time.Minute*10, time.Hour*12)
 			if err != nil {
 				fmt.Printf("Monitoring reactions: %s", err)
 				return
@@ -632,44 +312,6 @@ func run(ctx context.Context) error {
 
 		return nil
 	})
-}
-
-func replyMessageRating(
-	ctx context.Context,
-	client *tg.Client,
-	db *sql.DB,
-	e tg.Entities,
-	u *tg.UpdateNewChannelMessage,
-	replyID int,
-	chat *tg.Channel,
-) error {
-	msg, err := getMessage(db, chat.ID, replyID)
-	if err != nil {
-		return errors.Wrap(err, "getting saved message")
-	}
-
-	reactionsList, err := getReactionsList(ctx, client, msg, chat.AccessHash)
-	if err != nil {
-		return errors.Wrap(err, "getting reactions list for a message")
-	}
-	reactions, err := asReactions(reactionsList.Reactions, msg.ID)
-	if err != nil {
-		return errors.Wrap(err, "converting reaction")
-	}
-
-	totalRating, err := rateMessage(db, reactions, msg)
-	if err != nil {
-		return errors.Wrap(err, "rating message")
-	}
-
-	sender := message.NewSender(client)
-	_, err = sender.Reply(e, u).Text(ctx, fmt.Sprint(totalRating))
-	if err != nil {
-		fmt.Println(err)
-		return errors.Wrap(err, "sending reply")
-	}
-
-	return nil
 }
 
 func main() {

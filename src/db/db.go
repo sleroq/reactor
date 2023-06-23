@@ -1,4 +1,4 @@
-package main
+package db
 
 import (
 	"database/sql"
@@ -7,10 +7,12 @@ import (
 	"github.com/go-faster/errors"
 	"github.com/gotd/td/bin"
 	"github.com/gotd/td/tg"
+	_ "github.com/mattn/go-sqlite3"
+	"golang.org/x/exp/slices"
 	"time"
 )
 
-func saveMessage(msg *tg.Message, chatId int64, db *sql.DB) error {
+func SaveMessage(msg *tg.Message, chatId int64, db *sql.DB) error {
 	sentDate := time.Unix(int64(msg.Date), 0)
 
 	var userId int64
@@ -84,7 +86,7 @@ func saveMessage(msg *tg.Message, chatId int64, db *sql.DB) error {
 	return nil
 }
 
-func saveReaction(db *sql.DB, reaction Reaction) error {
+func SaveReaction(db *sql.DB, reaction Reaction) error {
 	_, err := db.Exec(`
 		insert into reactions (
 			messageId,
@@ -119,7 +121,7 @@ func saveReaction(db *sql.DB, reaction Reaction) error {
 	return nil
 }
 
-func updateForwarded(db *sql.DB, chatId int64, messageId int) error {
+func UpdateForwarded(db *sql.DB, chatId int64, messageId int) error {
 	_, err := db.Exec(`
 		update messages
 		set forwarded = 1
@@ -130,7 +132,7 @@ func updateForwarded(db *sql.DB, chatId int64, messageId int) error {
 	return err
 }
 
-func deleteReaction(db *sql.DB, react Reaction) error {
+func DeleteReaction(db *sql.DB, react Reaction) error {
 	_, err := db.Exec(`
 		delete from reactions
 		where messageId = :messageID
@@ -141,7 +143,7 @@ func deleteReaction(db *sql.DB, react Reaction) error {
 	return err
 }
 
-func getChats(db *sql.DB) ([]Chat, error) {
+func GetChats(db *sql.DB) ([]Chat, error) {
 	chatRows, err := db.Query(`select * from chats`)
 	var chats []Chat
 	for chatRows.Next() {
@@ -168,7 +170,7 @@ func getChats(db *sql.DB) ([]Chat, error) {
 	return chats, nil
 }
 
-func scanMessageRows(rows *sql.Rows) ([]Message, error) {
+func ScanMessageRows(rows *sql.Rows) ([]Message, error) {
 	var messages []Message
 	for rows.Next() {
 		var message Message
@@ -195,7 +197,7 @@ func scanMessageRows(rows *sql.Rows) ([]Message, error) {
 	return messages, nil
 }
 
-func getMessage(db *sql.DB, chatID int64, msgID int) (Message, error) {
+func GetMessage(db *sql.DB, chatID int64, msgID int) (Message, error) {
 	msgRows, err := db.Query(`
 		select *
 		from messages
@@ -206,7 +208,7 @@ func getMessage(db *sql.DB, chatID int64, msgID int) (Message, error) {
 		return Message{}, errors.Wrap(err, "getting message replies")
 	}
 
-	messages, err := scanMessageRows(msgRows)
+	messages, err := ScanMessageRows(msgRows)
 	if err != nil {
 		return Message{}, errors.Wrap(err, "scanning message rows")
 	}
@@ -218,7 +220,7 @@ func getMessage(db *sql.DB, chatID int64, msgID int) (Message, error) {
 	return Message{}, fmt.Errorf("not found")
 }
 
-func getReplies(db *sql.DB, chatID int64, replyTo int) ([]Message, error) {
+func GetReplies(db *sql.DB, chatID int64, replyTo int) ([]Message, error) {
 	msgRows, err := db.Query(`
 		select *
 		from messages
@@ -229,10 +231,10 @@ func getReplies(db *sql.DB, chatID int64, replyTo int) ([]Message, error) {
 		return nil, errors.Wrap(err, "getting message replies")
 	}
 
-	return scanMessageRows(msgRows)
+	return ScanMessageRows(msgRows)
 }
 
-func getMessagesAfter(db *sql.DB, chatID int64, date time.Time) ([]Message, error) {
+func GetMessagesAfter(db *sql.DB, chatID int64, date time.Time) ([]Message, error) {
 	msgRows, err := db.Query(`
 				select * from messages
 				where SentDate > :startDate
@@ -242,10 +244,10 @@ func getMessagesAfter(db *sql.DB, chatID int64, date time.Time) ([]Message, erro
 		return nil, errors.Wrap(err, "getting messages to check")
 	}
 
-	return scanMessageRows(msgRows)
+	return ScanMessageRows(msgRows)
 }
 
-func getSavedReactions(db *sql.DB, chatId int64, messageId int) ([]Reaction, error) {
+func GetSavedReactions(db *sql.DB, chatId int64, messageId int) ([]Reaction, error) {
 	rows, err := db.Query(`
 		select 
 			r.messageId,
@@ -287,7 +289,7 @@ func getSavedReactions(db *sql.DB, chatId int64, messageId int) ([]Reaction, err
 	return reactions, nil
 }
 
-func saveChat(channel *tg.Channel, db *sql.DB) error {
+func SaveChat(channel *tg.Channel, db *sql.DB) error {
 	body, err := json.Marshal(channel)
 	if err != nil {
 		return errors.Wrap(err, "marshalling chat data")
@@ -343,7 +345,7 @@ type Reaction struct {
 	Big        bool
 }
 
-func setupDB() (*sql.DB, error) {
+func SetupDB() (*sql.DB, error) {
 	db, err := sql.Open("sqlite3", "./memoq.db")
 	if err != nil {
 		return nil, errors.Wrap(err, "opening sqlite database")
@@ -399,4 +401,39 @@ func setupDB() (*sql.DB, error) {
 	}
 
 	return db, nil
+}
+
+func SyncPeerReactions(botdb *sql.DB, old, new []Reaction) (err error) {
+	for _, react := range new {
+		hasNewReaction := slices.ContainsFunc(old, func(el Reaction) bool {
+			if el.SentDate.Equal(react.SentDate) && el.UserID == react.UserID {
+				return true
+			}
+			return false
+		})
+
+		if !hasNewReaction {
+			err = SaveReaction(botdb, react)
+			if err != nil {
+				return errors.Wrap(err, "saving new reaction")
+			}
+		}
+	}
+
+	for _, oldReact := range old {
+		hasOldReaction := slices.ContainsFunc(new, func(el Reaction) bool {
+			if el.SentDate.Equal(oldReact.SentDate) && el.UserID == oldReact.UserID {
+				return true
+			}
+			return false
+		})
+		if !hasOldReaction {
+			err = DeleteReaction(botdb, oldReact)
+			if err != nil {
+				return errors.Wrap(err, "deleting reaction")
+			}
+		}
+	}
+
+	return nil
 }
