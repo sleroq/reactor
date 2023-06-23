@@ -50,9 +50,9 @@ func (m Monitor) Start(delay time.Duration, ageLimit time.Duration) error {
 	for range time.Tick(delay) {
 		startDate := time.Now().Add(-ageLimit)
 
-		chats, err := db.GetChats(m.db)
+		chats, err := db.GetOnlySavedChats(m.options.Sources, m.db)
 		if err != nil {
-			return errors.Wrap(err, "getting chats from database")
+			return errors.Wrap(err, "getting saved chats from database")
 		}
 
 		for _, chat := range chats {

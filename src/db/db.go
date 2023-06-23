@@ -143,33 +143,6 @@ func DeleteReaction(db *sql.DB, react Reaction) error {
 	return err
 }
 
-func GetChats(db *sql.DB) ([]Chat, error) {
-	chatRows, err := db.Query(`select * from chats`)
-	var chats []Chat
-	for chatRows.Next() {
-		var chat Chat
-		var body string
-		err = chatRows.Scan(
-			&chat.ID,
-			&chat.UpdatedAt,
-			&chat.CreatedAt,
-			&chat.AccessHash,
-			&body,
-		)
-		if err != nil {
-			return nil, errors.Wrap(err, "scanning result")
-		}
-
-		err = json.Unmarshal([]byte(body), &chat.Body)
-		if err != nil {
-			return nil, errors.Wrap(err, "unmarshalling result")
-		}
-
-		chats = append(chats, chat)
-	}
-	return chats, nil
-}
-
 func ScanMessageRows(rows *sql.Rows) ([]Message, error) {
 	var messages []Message
 	for rows.Next() {
@@ -436,4 +409,52 @@ func SyncPeerReactions(botdb *sql.DB, old, new []Reaction) (err error) {
 	}
 
 	return nil
+}
+
+func GetOnlySavedChats(sources []tg.InputPeerClass, db *sql.DB) ([]Chat, error) {
+	ids := ""
+
+	for _, source := range sources {
+		switch v := source.(type) {
+		case *tg.InputPeerChannel:
+			ids += fmt.Sprint(v.ChannelID)
+		default:
+			return []Chat{}, fmt.Errorf("unexpected input type")
+		}
+	}
+
+	if len(ids) == 0 {
+		return []Chat{}, nil
+	}
+
+	query := fmt.Sprintf(`
+		select * from chats
+		where id in (%s)
+	`, ids)
+
+	chatRows, err := db.Query(query)
+	var chats []Chat
+	for chatRows.Next() {
+		var chat Chat
+		var body string
+		err = chatRows.Scan(
+			&chat.ID,
+			&chat.UpdatedAt,
+			&chat.CreatedAt,
+			&chat.AccessHash,
+			&body,
+		)
+		if err != nil {
+			return nil, errors.Wrap(err, "scanning result")
+		}
+
+		err = json.Unmarshal([]byte(body), &chat.Body)
+		if err != nil {
+			return nil, errors.Wrap(err, "unmarshalling result")
+		}
+
+		chats = append(chats, chat)
+	}
+
+	return chats, nil
 }
