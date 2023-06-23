@@ -123,18 +123,18 @@ func (m Monitor) Start(delay time.Duration, ageLimit time.Duration) error {
 						"with", totalRating, "rating",
 					)
 
-					//for _, destination := range m.options.Chats.Destinations {
-					//	err = m.bot.ForwardMessage(chat, destination, messageId)
-					//	if err != nil {
-					//		return errors.Wrap(err, "forwarding a msg")
-					//	}
-					//}
-					//
-					//// FIXME: Maybe move this up, so we don't retry to forward on errors
-					//err = db.UpdateForwarded(m.db, chat.ID, messageId)
-					//if err != nil {
-					//	return errors.Wrap(err, "updating forwarded status")
-					//}
+					for _, destination := range m.options.Chats.Destinations {
+						err = m.bot.ForwardMessage(chat, destination, messageId)
+						if err != nil {
+							return errors.Wrap(err, "forwarding a msg")
+						}
+					}
+
+					// FIXME: Maybe move this up, so we don't retry to forward on errors
+					err = db.UpdateForwarded(m.db, chat.ID, messageId)
+					if err != nil {
+						return errors.Wrap(err, "updating forwarded status")
+					}
 				}
 			}
 		}
