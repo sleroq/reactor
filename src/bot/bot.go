@@ -134,6 +134,10 @@ func (b Bot) GetReactionsList(msg db.Message, accessHash int64) (*tg.MessagesMes
 			Limit:    100,
 		})
 	if err != nil {
+		if tgerr.IsCode(err, 400) {
+			// Probably no reactions on this message yet
+			return &tg.MessagesMessageReactionsList{}, nil
+		}
 		return nil, err
 	}
 
