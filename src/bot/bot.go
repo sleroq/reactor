@@ -6,6 +6,7 @@ import (
 	"github.com/go-faster/errors"
 	"github.com/gotd/td/telegram/message"
 	"github.com/gotd/td/tg"
+	"github.com/gotd/td/tgerr"
 	"github.com/sleroq/memeq/src/db"
 	"math/rand"
 	"time"
@@ -153,4 +154,39 @@ func (b Bot) Reply(e tg.Entities, u *tg.UpdateNewChannelMessage, text string) er
 	}
 
 	return nil
+}
+
+func (b Bot) GetMessageText(chat tg.InputChannel, msgID int) (string, error) {
+	// TODO: Maybe rewrite this part and make requests for multiple messages at once
+	messages, err := b.api.ChannelsGetMessages(
+		b.ctx,
+		&tg.ChannelsGetMessagesRequest{
+			Channel: &tg.InputChannel{
+				ChannelID:  chat.ChannelID,
+				AccessHash: chat.AccessHash,
+			},
+			ID: []tg.InputMessageClass{&tg.InputMessageID{ID: msgID}},
+		},
+	)
+	if err != nil {
+		return "", errors.Wrap(err, "getting message from telegram")
+	}
+
+	var messageClass tg.MessageClass
+	switch v := messages.(type) {
+	case *tg.MessagesChannelMessages: // messages.channelMessages#c776ba4e
+		messageClass = v.Messages[0]
+	default:
+		return "", fmt.Errorf("unexpected messages type: %v %T", v, v)
+	}
+
+	var msg string
+	switch v := messageClass.(type) {
+	case *tg.Message: // message#38116ee0
+		msg = v.Message
+	default:
+		return "", fmt.Errorf("unexpected message type: %v %T", v, v)
+	}
+
+	return msg, nil
 }

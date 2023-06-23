@@ -20,13 +20,13 @@ type Thresholds struct {
 	Forward int
 }
 type Chats struct {
-	Sources      []tg.InputPeerClass
+	Sources      []tg.InputPeerChannel
 	Destinations []tg.InputPeerClass
 }
 
 type Options struct {
-	Thresholds
-	Chats
+	Thresholds Thresholds
+	Chats      Chats
 }
 
 type Monitor struct {
@@ -50,7 +50,7 @@ func (m Monitor) Start(delay time.Duration, ageLimit time.Duration) error {
 	for range time.Tick(delay) {
 		startDate := time.Now().Add(-ageLimit)
 
-		chats, err := db.GetOnlySavedChats(m.options.Sources, m.db)
+		chats, err := db.GetOnlySavedChats(m.options.Chats.Sources, m.db)
 		if err != nil {
 			return errors.Wrap(err, "getting saved chats from database")
 		}
@@ -95,37 +95,70 @@ func (m Monitor) Start(delay time.Duration, ageLimit time.Duration) error {
 					return errors.Wrap(err, "rating message")
 				}
 
-				threshold := 23
-				if !msg.WithPhoto &&
-					msg.FwdFromChannel == 0 &&
+				threshold := m.options.Thresholds.Forward
+				if msg.FwdFromChannel == 0 &&
 					msg.FwdFromUser == 0 {
-					threshold = 31
+					threshold = m.options.Thresholds.Photo
+				}
+				if !msg.WithPhoto {
+					threshold = m.options.Thresholds.Text
 				}
 
 				if totalRating > threshold {
+					// Checking to see if message was edited
+					msg, err := m.UpdateMessage(tg.InputChannel{
+						ChannelID:  chat.ID,
+						AccessHash: chat.AccessHash,
+					}, msg)
+					finalRating, err := m.rateMessage(reactions, msg)
+					if err != nil {
+						return errors.Wrap(err, "rating message")
+					}
+					if finalRating <= threshold {
+						return nil
+					}
+
 					fmt.Println(
 						"forwarding msg", messageId,
 						"with", totalRating, "rating",
 					)
 
-					for _, destination := range m.options.Chats.Destinations {
-						err = m.bot.ForwardMessage(chat, destination, messageId)
-						if err != nil {
-							return errors.Wrap(err, "forwarding a msg")
-						}
-					}
-
-					// FIXME: Maybe move this up, so we don't retry to forward on errors
-					err = db.UpdateForwarded(m.db, chat.ID, messageId)
-					if err != nil {
-						return errors.Wrap(err, "updating forwarded status")
-					}
+					//for _, destination := range m.options.Chats.Destinations {
+					//	err = m.bot.ForwardMessage(chat, destination, messageId)
+					//	if err != nil {
+					//		return errors.Wrap(err, "forwarding a msg")
+					//	}
+					//}
+					//
+					//// FIXME: Maybe move this up, so we don't retry to forward on errors
+					//err = db.UpdateForwarded(m.db, chat.ID, messageId)
+					//if err != nil {
+					//	return errors.Wrap(err, "updating forwarded status")
+					//}
 				}
 			}
 		}
 	}
 
 	return nil
+}
+
+func (m Monitor) UpdateMessage(chat tg.InputChannel, msg db.Message) (db.Message, error) {
+	newText, err := m.bot.GetMessageText(chat, msg.ID)
+	if err != nil {
+		return db.Message{}, errors.Wrap(err, "getting new message text")
+	}
+
+	if msg.Body != newText {
+		fmt.Println("message text is different, updating message")
+		msg.Body = newText
+		err = db.UpdateMessageBody(m.db, msg)
+		if err != nil {
+			return db.Message{}, errors.Wrap(err, "updating message body with new one")
+		}
+	}
+
+	return msg, nil
 }
 
 func (m Monitor) syncReactions(new tg.MessageReactions, msg db.Message, accessHash int64) (reactions []db.Reaction, err error) {
@@ -180,7 +213,12 @@ func (m Monitor) rateMessage(reactions []db.Reaction, msg db.Message) (int, erro
 		}
 	}
 
-	positiveRepliedUsers, err := helpers.PositiveReplies(m.db, msg.ID, msg.ChatID)
+	replies, err := db.GetReplies(m.db, msg.ChatID, msg.ID)
+	if err != nil {
+		return 0, errors.Wrap(err, "getting replies from database")
+	}
+
+	positiveRepliedUsers, err := helpers.PositiveReplies(replies)
 	if err != nil {
 		return 0, errors.Wrap(err, "getting positive replied users")
 	}
@@ -224,6 +262,11 @@ func (m Monitor) ReplyMessageRating(
 	if err != nil {
 		return errors.Wrap(err, "getting saved message")
 	}
+
+	msg, err = m.UpdateMessage(tg.InputChannel{
+		ChannelID:  chat.ID,
+		AccessHash: chat.AccessHash,
+	}, msg)
 
 	reactionsList, err := m.bot.GetReactionsList(msg, chat.AccessHash)
 	if err != nil {

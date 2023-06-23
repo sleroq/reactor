@@ -1,7 +1,6 @@
 package helpers
 
 import (
-	"database/sql"
 	"fmt"
 	"github.com/go-faster/errors"
 	"github.com/gotd/td/tg"
@@ -268,12 +267,7 @@ func matchMultiple(s string, items []string, words bool) (bool, error) {
 	return result, nil
 }
 
-func PositiveReplies(sqlDB *sql.DB, messageId int, chatId int64) (map[int64]string, error) {
-	messages, err := db.GetReplies(sqlDB, chatId, messageId)
-	if err != nil {
-		return nil, errors.Wrap(err, "getting replies from database")
-	}
-
+func PositiveReplies(messages []db.Message) (map[int64]string, error) {
 	replies := make(map[int64]string)
 	for _, reply := range messages {
 		body := strings.TrimSpace(reply.Body)

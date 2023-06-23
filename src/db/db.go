@@ -86,6 +86,21 @@ func SaveMessage(msg *tg.Message, chatId int64, db *sql.DB) error {
 	return nil
 }
 
+func UpdateMessageBody(db *sql.DB, msg Message) error {
+	_, err := db.Exec(`
+		update messages
+		set body = :body
+		where id = :id
+		and chatId = :chatID
+	`, msg.Body, msg.ID, msg.ChatID)
+
+	if err != nil {
+		return errors.Wrap(err, "updating message body")
+	}
+
+	return nil
+}
+
 func SaveReaction(db *sql.DB, reaction Reaction) error {
 	_, err := db.Exec(`
 		insert into reactions (
@@ -337,6 +352,7 @@ func SetupDB() (*sql.DB, error) {
 		return nil, errors.Wrap(err, "creating chats table")
 	}
 
+	// TODO: Remove/change primary key in messages. this is dumb
 	_, err = db.Exec(`
 		create table if not exists messages (
 			id integer not null primary key,
@@ -411,16 +427,11 @@ func SyncPeerReactions(botdb *sql.DB, old, new []Reaction) (err error) {
 	return nil
 }
 
-func GetOnlySavedChats(sources []tg.InputPeerClass, db *sql.DB) ([]Chat, error) {
+func GetOnlySavedChats(sources []tg.InputPeerChannel, db *sql.DB) ([]Chat, error) {
 	ids := ""
 
 	for _, source := range sources {
-		switch v := source.(type) {
-		case *tg.InputPeerChannel:
-			ids += fmt.Sprint(v.ChannelID)
-		default:
-			return []Chat{}, fmt.Errorf("unexpected input type")
-		}
+		ids += fmt.Sprint(source.ChannelID)
 	}
 
 	if len(ids) == 0 {

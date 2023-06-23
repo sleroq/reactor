@@ -179,7 +179,6 @@ func run(ctx context.Context) error {
 	inputChannel := tg.InputPeerChannel{
 		ChannelID: selectedChatId,
 	}
-
 	destinationChannel := tg.InputPeerChannel{
 		ChannelID:  channelId,
 		AccessHash: channelAccessHash,
@@ -192,7 +191,7 @@ func run(ctx context.Context) error {
 			Forward: 23,
 		},
 		Chats: monitor.Chats{
-			Sources:      []tg.InputPeerClass{&inputChannel},
+			Sources:      []tg.InputPeerChannel{inputChannel},
 			Destinations: []tg.InputPeerClass{&destinationChannel},
 		},
 	}
