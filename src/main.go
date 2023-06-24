@@ -219,7 +219,7 @@ func run(ctx context.Context) error {
 		// fmt.Println(msg.Message, p.Channel.ID, p.Channel.AccessHash)
 
 		allowed := slices.ContainsFunc(chatsToMonitor, func(ch tg.InputPeerChannel) bool {
-			if p.Channel.ID != ch.ChannelID {
+			if p.Channel.ID == ch.ChannelID {
 				return true
 			}
 			return false
