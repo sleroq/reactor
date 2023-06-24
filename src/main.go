@@ -235,6 +235,7 @@ func run(ctx context.Context) error {
 		}
 
 		// fmt.Println(msg.Message, p.Channel.ID, p.Channel.AccessHash)
+		// fmt.Println(formatObject(msg))
 
 		allowed := slices.ContainsFunc(chatsToMonitor, func(ch tg.InputPeerChannel) bool {
 			if p.Channel.ID == ch.ChannelID {
@@ -250,8 +251,6 @@ func run(ctx context.Context) error {
 		if err != nil {
 			return errors.Wrap(err, "saving chat")
 		}
-
-		fmt.Println(formatObject(msg))
 
 		err = db.SaveMessage(msg, p.Channel.ID, botDB)
 		if err != nil {
