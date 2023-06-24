@@ -19,8 +19,9 @@ func SaveMessage(msg *tg.Message, chatId int64, db *sql.DB) error {
 	switch v := msg.FromID.(type) {
 	case *tg.PeerUser:
 		userId = v.UserID
+	case *tg.PeerChannel:
 	case nil:
-		// Not saving this shit
+		// Not saving this shit (sorry, too lazy)
 		return nil
 	default:
 		return fmt.Errorf("unexpected message sender type: %s", v)
