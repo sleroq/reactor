@@ -123,8 +123,10 @@ func (m Monitor) Start(delay time.Duration, ageLimit time.Duration) error {
 						"with", totalRating, "rating",
 					)
 
+					messages, err := db.GetMessagesGroup(m.db, msg.GroupedID)
+
 					for _, destination := range m.options.Chats.Destinations {
-						err = m.bot.ForwardMessage(chat, destination, messageId)
+						err = m.bot.ForwardMessages(chat, destination, messages)
 						if err != nil {
 							return errors.Wrap(err, "forwarding a msg")
 						}

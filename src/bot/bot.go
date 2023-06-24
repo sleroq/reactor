@@ -32,9 +32,14 @@ func New(ctx context.Context, api *tg.Client) *Bot {
 	}
 }
 
-func (b Bot) ForwardMessage(source db.Chat, destination tg.InputPeerClass, messageID int) error {
+func (b Bot) ForwardMessages(source db.Chat, destination tg.InputPeerClass, messages []db.Message) error {
 	rSource := rand.NewSource(time.Now().UnixNano())
 	generator := rand.New(rSource)
+
+	var msgIDs []int
+	for _, msg := range messages {
+		msgIDs = append(msgIDs, msg.ID)
+	}
 
 	_, err := b.api.MessagesForwardMessages(
 		b.ctx,
@@ -50,7 +55,7 @@ func (b Bot) ForwardMessage(source db.Chat, destination tg.InputPeerClass, messa
 				ChannelID:  source.ID,
 				AccessHash: source.AccessHash,
 			},
-			ID:           []int{messageID},
+			ID:           msgIDs,
 			RandomID:     []int64{generator.Int63()},
 			ToPeer:       destination,
 			TopMsgID:     0,

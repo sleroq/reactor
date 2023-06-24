@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-func SaveMessage(msg *tg.Message, chatId int64, db *sql.DB) error {
+func SaveMessage(msg *tg.Message, chatID int64, db *sql.DB) error {
 	sentDate := time.Unix(int64(msg.Date), 0)
 
 	var userId int64
@@ -59,27 +59,30 @@ func SaveMessage(msg *tg.Message, chatId int64, db *sql.DB) error {
 		    fwdFromChannel,
 		    withPhoto,
 			userId,
-		    body
+		    body,
+		    groupedId
 		) values (
 		    :ID,
 			:sentDate,
-			:chatId,
+			:chatID,
 			:replyTo,
 		    :fwdFromUser,
 		    :fwdFromChannel,
 		    :withPhoto,
-		    :userId,
-		    :body
+		    :userID,
+		    :body,
+		    :groupedID
 		)`,
 		msg.ID,
 		sentDate,
-		chatId,
+		chatID,
 		msg.ReplyTo.ReplyToMsgID,
 		fwdFromUser,
 		fwdFromChannel,
 		hasPhoto,
 		userId,
-		msg.Message)
+		msg.Message,
+		msg.GroupedID)
 	if err != nil {
 		return errors.Wrap(err, "saving message to database")
 	}
@@ -140,13 +143,13 @@ func SaveReaction(db *sql.DB, reaction Reaction) error {
 	return nil
 }
 
-func UpdateForwarded(db *sql.DB, chatId int64, messageId int) error {
+func UpdateForwarded(db *sql.DB, chatID int64, messageID int) error {
 	_, err := db.Exec(`
 		update messages
 		set forwarded = 1
 		where chatId = :chatID
 			and id = :messageID
-	`, chatId, messageId)
+	`, chatID, messageID)
 
 	return err
 }
@@ -179,6 +182,7 @@ func ScanMessageRows(rows *sql.Rows) ([]Message, error) {
 			&message.ReplyTo,
 			&message.UserID,
 			&message.Body,
+			&message.GroupedID,
 		)
 		if err != nil {
 			return nil, errors.Wrap(err, "scanning message row")
@@ -233,6 +237,18 @@ func GetMessagesAfter(db *sql.DB, chatID int64, date time.Time) ([]Message, erro
 				where SentDate > :startDate
 				and chatId = :chatID
 			`, date, chatID)
+	if err != nil {
+		return nil, errors.Wrap(err, "getting messages to check")
+	}
+
+	return ScanMessageRows(msgRows)
+}
+
+func GetMessagesGroup(db *sql.DB, groupedID int64) ([]Message, error) {
+	msgRows, err := db.Query(`
+				select * from messages
+				where groupedId = :groupedID
+			`, groupedID)
 	if err != nil {
 		return nil, errors.Wrap(err, "getting messages to check")
 	}
@@ -326,6 +342,7 @@ type Message struct {
 	ReplyTo        int64
 	UserID         int64
 	Body           string
+	GroupedID      int64
 }
 
 type Reaction struct {
@@ -371,6 +388,7 @@ func SetupDB() (*sql.DB, error) {
 			replyTo integer default 0,
 			userId integer not null,
 			body text not null,
+			groupedId integer default 0,
 			primary key (id, chatId),
 			foreign key(chatId) references chats(id)
 		);
