@@ -9,6 +9,8 @@ import (
 	"github.com/gotd/td/tg"
 	_ "github.com/mattn/go-sqlite3"
 	"golang.org/x/exp/slices"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -457,20 +459,20 @@ func SyncPeerReactions(botdb *sql.DB, old, new []Reaction) (err error) {
 }
 
 func GetOnlySavedChats(sources []tg.InputPeerChannel, db *sql.DB) ([]Chat, error) {
-	ids := ""
+	var IDs []string
 
 	for _, source := range sources {
-		ids += fmt.Sprint(source.ChannelID)
+		IDs = append(IDs, strconv.FormatInt(source.ChannelID, 10))
 	}
 
-	if len(ids) == 0 {
+	if len(IDs) == 0 {
 		return []Chat{}, nil
 	}
 
 	query := fmt.Sprintf(`
 		select * from chats
 		where id in (%s)
-	`, ids)
+	`, strings.Join(IDs, ", "))
 
 	chatRows, err := db.Query(query)
 	var chats []Chat
