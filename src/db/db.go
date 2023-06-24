@@ -352,7 +352,6 @@ func SetupDB() (*sql.DB, error) {
 		return nil, errors.Wrap(err, "creating chats table")
 	}
 
-	// TODO: Remove/change primary key in messages. this is dumb
 	_, err = db.Exec(`
 		create table if not exists messages (
 			id integer not null,
@@ -381,8 +380,7 @@ func SetupDB() (*sql.DB, error) {
 			documentId integer,
 			sentDate datetime not null,
 			flags integer not null,
-			big integer not null,
-		    foreign key(messageId) references messages(id)
+			big integer not null
 		);
 	`)
 	if err != nil {
