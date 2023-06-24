@@ -317,7 +317,7 @@ func PositiveReplies(messages []db.Message) (map[int64]string, error) {
 	return replies, nil
 }
 
-func AsReactions(tgReactions []tg.MessagePeerReaction, messageID int) ([]db.Reaction, error) {
+func AsReactions(tgReactions []tg.MessagePeerReaction, chatID int64, messageID int) ([]db.Reaction, error) {
 	var reactions []db.Reaction
 	for _, tgReaction := range tgReactions {
 		sentDate := time.Unix(int64(tgReaction.Date), 0)
@@ -342,8 +342,9 @@ func AsReactions(tgReactions []tg.MessagePeerReaction, messageID int) ([]db.Reac
 		}
 
 		reaction := db.Reaction{
-			UserID:     userID,
+			ChatID:     chatID,
 			MessageID:  messageID,
+			UserID:     userID,
 			Emoticon:   emoticon,
 			DocumentID: documentId,
 			SentDate:   sentDate,

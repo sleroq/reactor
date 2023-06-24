@@ -104,6 +104,7 @@ func UpdateMessageBody(db *sql.DB, msg Message) error {
 func SaveReaction(db *sql.DB, reaction Reaction) error {
 	_, err := db.Exec(`
 		insert into reactions (
+            chatId,
 			messageId,
 			userId,
 			emoticon,
@@ -112,6 +113,7 @@ func SaveReaction(db *sql.DB, reaction Reaction) error {
 			flags,
 			big
 		) values (
+		    :chatID,
 		    :messageID,
 		    :userID,
 			:emoticon,
@@ -120,6 +122,7 @@ func SaveReaction(db *sql.DB, reaction Reaction) error {
 			:flags,
 			:big
 		)`,
+		reaction.ChatID,
 		reaction.MessageID,
 		reaction.UserID,
 		reaction.Emoticon,
@@ -151,9 +154,10 @@ func DeleteReaction(db *sql.DB, react Reaction) error {
 	_, err := db.Exec(`
 		delete from reactions
 		where messageId = :messageID
+		    and chatId = :chatID
 			and userId = :userID
 			and sentDate = :SentDate
-	`, react.MessageID, react.UserID, react.SentDate)
+	`, react.MessageID, react.ChatID, react.UserID, react.SentDate)
 
 	return err
 }
@@ -235,22 +239,21 @@ func GetMessagesAfter(db *sql.DB, chatID int64, date time.Time) ([]Message, erro
 	return ScanMessageRows(msgRows)
 }
 
-func GetSavedReactions(db *sql.DB, chatId int64, messageId int) ([]Reaction, error) {
+func GetSavedReactions(db *sql.DB, chatID int64, messageID int) ([]Reaction, error) {
 	rows, err := db.Query(`
 		select 
-			r.messageId,
-			r.userId,
-			r.emoticon,
-			r.documentId,
-			r.sentDate,
-			r.flags,
-			r.big
-		from reactions r,
-			messages m
-		where r.messageId = m.id
-			and m.id = :messageID
-			and m.chatId = :chatID
-	`, messageId, chatId)
+		    chatId,
+			messageId,
+			userId,
+			emoticon,
+			documentId,
+			sentDate,
+			flags,
+			big
+		from reactions
+		where chatId = :chatID
+		    and messageId = :messageID
+	`, chatID, messageID)
 	if err != nil {
 		return nil, errors.Wrap(err, "querying reactions for message")
 	}
@@ -259,6 +262,7 @@ func GetSavedReactions(db *sql.DB, chatId int64, messageId int) ([]Reaction, err
 	for rows.Next() {
 		var reaction Reaction
 		err = rows.Scan(
+			&reaction.ChatID,
 			&reaction.MessageID,
 			&reaction.UserID,
 			&reaction.Emoticon,
@@ -324,8 +328,9 @@ type Message struct {
 }
 
 type Reaction struct {
-	UserID     int64
+	ChatID     int64
 	MessageID  int
+	UserID     int64
 	Emoticon   string
 	DocumentID int64
 	SentDate   time.Time
@@ -396,7 +401,9 @@ func SetupDB() (*sql.DB, error) {
 func SyncPeerReactions(botdb *sql.DB, old, new []Reaction) (err error) {
 	for _, react := range new {
 		hasNewReaction := slices.ContainsFunc(old, func(el Reaction) bool {
-			if el.SentDate.Equal(react.SentDate) && el.UserID == react.UserID {
+			if el.SentDate.Equal(react.SentDate) &&
+				el.UserID == react.UserID &&
+				el.ChatID == react.ChatID {
 				return true
 			}
 			return false
@@ -412,7 +419,9 @@ func SyncPeerReactions(botdb *sql.DB, old, new []Reaction) (err error) {
 
 	for _, oldReact := range old {
 		hasOldReaction := slices.ContainsFunc(new, func(el Reaction) bool {
-			if el.SentDate.Equal(oldReact.SentDate) && el.UserID == oldReact.UserID {
+			if el.SentDate.Equal(oldReact.SentDate) &&
+				el.UserID == oldReact.UserID &&
+				el.ChatID == oldReact.ChatID {
 				return true
 			}
 			return false
