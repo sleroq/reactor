@@ -56,7 +56,7 @@ func SaveMessage(msg *tg.Message, chatId int64, db *sql.DB) error {
 		    replyTo,
 		    fwdFromUser,
 		    fwdFromChannel,
-		    WithPhoto,
+		    withPhoto,
 			userId,
 		    body
 		) values (
@@ -66,7 +66,7 @@ func SaveMessage(msg *tg.Message, chatId int64, db *sql.DB) error {
 			:replyTo,
 		    :fwdFromUser,
 		    :fwdFromChannel,
-		    :WithPhoto,
+		    :withPhoto,
 		    :userId,
 		    :body
 		)`,
@@ -361,10 +361,11 @@ func SetupDB() (*sql.DB, error) {
 			forwarded integer default 0,
 			fwdFromUser integer default 0,
 			fwdFromChannel integer default 0,
-			WithPhoto integer not null,
+			withPhoto integer not null,
 			replyTo integer default 0,
 			userId integer not null,
 			body text not null,
+			primary key (id, chatId),
 			foreign key(chatId) references chats(id)
 		);
 	`)
@@ -375,12 +376,14 @@ func SetupDB() (*sql.DB, error) {
 	_, err = db.Exec(`
 		create table if not exists reactions (
 			messageId integer not null,
+			chatId integer not null,
 			userId integer not null,
 			emoticon text,
 			documentId integer,
 			sentDate datetime not null,
 			flags integer not null,
-			big integer not null
+			big integer not null,
+			foreign key(messageId, chatId) references messages(id, chatId)
 		);
 	`)
 	if err != nil {
