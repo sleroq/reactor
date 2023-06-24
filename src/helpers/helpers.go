@@ -367,7 +367,7 @@ func FormatObject(input interface{}) string {
 		rv := reflect.Indirect(reflect.ValueOf(input))
 		for i := 0; i < rv.NumField(); i++ {
 			if v, ok := rv.Field(i).Interface().(tdp.Object); ok {
-				return formatObject(v)
+				return FormatObject(v)
 			}
 		}
 
