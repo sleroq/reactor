@@ -3,8 +3,10 @@ package helpers
 import (
 	"fmt"
 	"github.com/go-faster/errors"
+	"github.com/gotd/td/tdp"
 	"github.com/gotd/td/tg"
 	"github.com/sleroq/reactor/src/db"
+	"reflect"
 	"regexp"
 	"strings"
 	"time"
@@ -356,4 +358,20 @@ func AsReactions(tgReactions []tg.MessagePeerReaction, chatID int64, messageID i
 	}
 
 	return reactions, nil
+}
+
+func FormatObject(input interface{}) string {
+	o, ok := input.(tdp.Object)
+	if !ok {
+		// Handle tg.*Box values.
+		rv := reflect.Indirect(reflect.ValueOf(input))
+		for i := 0; i < rv.NumField(); i++ {
+			if v, ok := rv.Field(i).Interface().(tdp.Object); ok {
+				return formatObject(v)
+			}
+		}
+
+		return fmt.Sprintf("%T (not object)", input)
+	}
+	return tdp.Format(o)
 }

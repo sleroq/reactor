@@ -12,7 +12,6 @@ import (
 	"github.com/gotd/contrib/middleware/ratelimit"
 	"github.com/gotd/contrib/pebble"
 	"github.com/gotd/contrib/storage"
-	"github.com/gotd/td/tdp"
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/telegram/auth"
 	"github.com/gotd/td/telegram/message/peer"
@@ -33,7 +32,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -58,22 +56,6 @@ type Environment struct {
 	ChatsToMonitor        string `env:"REACTOR_CHAT_IDS,required=true"`
 	DestChannelID         int64  `env:"REACTOR_CHANNEL_ID,required=true"`
 	DestChannelAccessHash int64  `env:"REACTOR_CHANNEL_ACCESS_HASH,required=true"`
-}
-
-func formatObject(input interface{}) string {
-	o, ok := input.(tdp.Object)
-	if !ok {
-		// Handle tg.*Box values.
-		rv := reflect.Indirect(reflect.ValueOf(input))
-		for i := 0; i < rv.NumField(); i++ {
-			if v, ok := rv.Field(i).Interface().(tdp.Object); ok {
-				return formatObject(v)
-			}
-		}
-
-		return fmt.Sprintf("%T (not object)", input)
-	}
-	return tdp.Format(o)
 }
 
 func run(ctx context.Context) error {
@@ -235,7 +217,7 @@ func run(ctx context.Context) error {
 		}
 
 		// fmt.Println(msg.Message, p.Channel.ID, p.Channel.AccessHash)
-		// fmt.Println(formatObject(msg))
+		// fmt.Println(helpers.FormatObject(msg))
 
 		allowed := slices.ContainsFunc(chatsToMonitor, func(ch tg.InputPeerChannel) bool {
 			if p.Channel.ID == ch.ChannelID {
