@@ -32,7 +32,7 @@ func New(ctx context.Context, api *tg.Client) *Bot {
 	}
 }
 
-func (b Bot) ForwardMessages(source db.Chat, destination tg.InputPeerClass, messages []db.Message) error {
+func (b Bot) ForwardMessages(source db.Chat, destination tg.InputPeerClass, messages []db.Message, NoQuote bool) error {
 	rSource := rand.NewSource(time.Now().UnixNano())
 	generator := rand.New(rSource)
 
@@ -48,7 +48,7 @@ func (b Bot) ForwardMessages(source db.Chat, destination tg.InputPeerClass, mess
 			Silent:            false,
 			Background:        false,
 			WithMyScore:       false,
-			DropAuthor:        true,
+			DropAuthor:        NoQuote,
 			DropMediaCaptions: false,
 			Noforwards:        false,
 			FromPeer: &tg.InputPeerChannel{

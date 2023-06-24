@@ -6,6 +6,7 @@ import (
 	"github.com/go-faster/errors"
 	"github.com/gotd/td/tg"
 	"github.com/sleroq/reactor/src/bot"
+	"golang.org/x/exp/slices"
 
 	"github.com/sleroq/reactor/src/db"
 	"github.com/sleroq/reactor/src/helpers"
@@ -25,8 +26,9 @@ type Chats struct {
 }
 
 type Options struct {
-	Thresholds Thresholds
-	Chats      Chats
+	Thresholds       Thresholds
+	Chats            Chats
+	NoQuoteWhitelist []int64
 }
 
 type Monitor struct {
@@ -123,10 +125,21 @@ func (m Monitor) Start(delay time.Duration, ageLimit time.Duration) error {
 						"with", totalRating, "rating",
 					)
 
+					noQuote := true
+					if slices.Contains(m.options.NoQuoteWhitelist, msg.FwdFromChannel) {
+						noQuote = false
+					}
+					if slices.Contains(m.options.NoQuoteWhitelist, msg.FwdFromUser) {
+						noQuote = false
+					}
+					if slices.Contains(m.options.NoQuoteWhitelist, msg.UserID) {
+						noQuote = false
+					}
+
 					messages, err := db.GetMessagesGroup(m.db, msg.GroupedID)
 
 					for _, destination := range m.options.Chats.Destinations {
-						err = m.bot.ForwardMessages(chat, destination, messages)
+						err = m.bot.ForwardMessages(chat, destination, messages, noQuote)
 						if err != nil {
 							return errors.Wrap(err, "forwarding a msg")
 						}

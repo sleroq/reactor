@@ -57,6 +57,8 @@ type Environment struct {
 	DestChannelID         int64  `env:"REACTOR_CHANNEL_ID,required=true"`
 	DestChannelAccessHash int64  `env:"REACTOR_CHANNEL_ACCESS_HASH,required=true"`
 
+	NoQuoteWhitelist string `env:"REACTOR_NOQUOTE_WHITELIST"`
+
 	Thresholds struct {
 		Text    int `env:"REACTOR_TEXT_THRESHOLD,default=31"`
 		Photo   int `env:"REACTOR_TEXT_THRESHOLD,default=23"`
@@ -184,6 +186,17 @@ func run(ctx context.Context) error {
 		})
 	}
 
+	noQuoteIDs := strings.Split(environment.NoQuoteWhitelist, ",")
+	var noQuoteWhitelist []int64
+	for _, stringID := range noQuoteIDs {
+		id, err := strconv.ParseInt(strings.TrimSpace(stringID), 10, 64)
+		if err != nil {
+			return errors.Wrap(err, "parsing channelID from noQuoteWhitelist")
+		}
+
+		noQuoteWhitelist = append(noQuoteWhitelist, id)
+	}
+
 	destinationChannel := tg.InputPeerChannel{
 		ChannelID:  environment.DestChannelID,
 		AccessHash: environment.DestChannelAccessHash,
@@ -195,6 +208,7 @@ func run(ctx context.Context) error {
 			Sources:      chatsToMonitor,
 			Destinations: []tg.InputPeerClass{&destinationChannel},
 		},
+		NoQuoteWhitelist: noQuoteWhitelist,
 	}
 	monit := monitor.New(monitorOptions, botDB, bot)
 
