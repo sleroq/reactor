@@ -136,7 +136,10 @@ func (m Monitor) Start(delay time.Duration, ageLimit time.Duration) error {
 						noQuote = false
 					}
 
-					messages, err := db.GetMessagesGroup(m.db, msg.GroupedID)
+					messages := []db.Message{msg}
+					if msg.GroupedID != 0 {
+						messages, err = db.GetMessagesGroup(m.db, msg.GroupedID)
+					}
 
 					for _, destination := range m.options.Chats.Destinations {
 						err = m.bot.ForwardMessages(chat, destination, messages, noQuote)

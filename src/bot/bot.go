@@ -37,8 +37,10 @@ func (b Bot) ForwardMessages(source db.Chat, destination tg.InputPeerClass, mess
 	generator := rand.New(rSource)
 
 	var msgIDs []int
+	var randomIDs []int64
 	for _, msg := range messages {
 		msgIDs = append(msgIDs, msg.ID)
+		randomIDs = append(randomIDs, generator.Int63())
 	}
 
 	_, err := b.api.MessagesForwardMessages(
@@ -56,7 +58,7 @@ func (b Bot) ForwardMessages(source db.Chat, destination tg.InputPeerClass, mess
 				AccessHash: source.AccessHash,
 			},
 			ID:           msgIDs,
-			RandomID:     []int64{generator.Int63()},
+			RandomID:     randomIDs,
 			ToPeer:       destination,
 			TopMsgID:     0,
 			ScheduleDate: 0,
