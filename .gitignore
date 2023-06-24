@@ -2,4 +2,4 @@
 /scripts/env.*sh
 /dist/
 /session/
-/memoq.db
+/reactor.db

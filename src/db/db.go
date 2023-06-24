@@ -334,7 +334,7 @@ type Reaction struct {
 }
 
 func SetupDB() (*sql.DB, error) {
-	db, err := sql.Open("sqlite3", "./memoq.db")
+	db, err := sql.Open("sqlite3", "./reactor.db")
 	if err != nil {
 		return nil, errors.Wrap(err, "opening sqlite database")
 	}
@@ -355,7 +355,7 @@ func SetupDB() (*sql.DB, error) {
 	// TODO: Remove/change primary key in messages. this is dumb
 	_, err = db.Exec(`
 		create table if not exists messages (
-			id integer not null primary key,
+			id integer not null,
 			updatedAt datetime default (datetime('now')),
 			sentDate timestamp not null,
 			chatId integer not null,

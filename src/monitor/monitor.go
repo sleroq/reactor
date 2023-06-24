@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"github.com/go-faster/errors"
 	"github.com/gotd/td/tg"
-	"github.com/sleroq/memeq/src/bot"
+	"github.com/sleroq/reactor/src/bot"
 
-	"github.com/sleroq/memeq/src/db"
-	"github.com/sleroq/memeq/src/helpers"
+	"github.com/sleroq/reactor/src/db"
+	"github.com/sleroq/reactor/src/helpers"
 	"regexp"
 	"strings"
 	"time"
