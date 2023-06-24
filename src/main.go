@@ -56,6 +56,12 @@ type Environment struct {
 	ChatsToMonitor        string `env:"REACTOR_CHAT_IDS,required=true"`
 	DestChannelID         int64  `env:"REACTOR_CHANNEL_ID,required=true"`
 	DestChannelAccessHash int64  `env:"REACTOR_CHANNEL_ACCESS_HASH,required=true"`
+
+	Thresholds struct {
+		Text    int `env:"REACTOR_TEXT_THRESHOLD,default=31"`
+		Photo   int `env:"REACTOR_TEXT_THRESHOLD,default=23"`
+		Forward int `env:"REACTOR_TEXT_THRESHOLD,default=23"`
+	}
 }
 
 func run(ctx context.Context) error {
@@ -184,11 +190,7 @@ func run(ctx context.Context) error {
 	}
 
 	monitorOptions := monitor.Options{
-		Thresholds: monitor.Thresholds{
-			Text:    31,
-			Photo:   23,
-			Forward: 23,
-		},
+		Thresholds: monitor.Thresholds(environment.Thresholds),
 		Chats: monitor.Chats{
 			Sources:      chatsToMonitor,
 			Destinations: []tg.InputPeerClass{&destinationChannel},
