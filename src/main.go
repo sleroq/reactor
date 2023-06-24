@@ -4,7 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	env "github.com/Netflix/go-env"
+	"github.com/Netflix/go-env"
 	pebbledb "github.com/cockroachdb/pebble"
 	"github.com/go-faster/errors"
 	boltstor "github.com/gotd/contrib/bbolt"
@@ -21,7 +21,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/sleroq/reactor/src/bot"
 	"github.com/sleroq/reactor/src/db"
-	monitor "github.com/sleroq/reactor/src/monitor"
+	"github.com/sleroq/reactor/src/monitor"
 	"go.etcd.io/bbolt"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -56,6 +56,14 @@ type Environment struct {
 	ChatsToMonitor        string `env:"REACTOR_CHAT_IDS,required=true"`
 	DestChannelID         int64  `env:"REACTOR_CHANNEL_ID,required=true"`
 	DestChannelAccessHash int64  `env:"REACTOR_CHANNEL_ACCESS_HASH,required=true"`
+
+	NoQuoteWhitelist string `env:"REACTOR_NOQUOTE_WHITELIST"`
+
+	Thresholds struct {
+		Text    int `env:"REACTOR_TEXT_THRESHOLD,default=31"`
+		Photo   int `env:"REACTOR_TEXT_THRESHOLD,default=23"`
+		Forward int `env:"REACTOR_TEXT_THRESHOLD,default=23"`
+	}
 }
 
 func run(ctx context.Context) error {
@@ -178,21 +186,29 @@ func run(ctx context.Context) error {
 		})
 	}
 
+	noQuoteIDs := strings.Split(environment.NoQuoteWhitelist, ",")
+	var noQuoteWhitelist []int64
+	for _, stringID := range noQuoteIDs {
+		id, err := strconv.ParseInt(strings.TrimSpace(stringID), 10, 64)
+		if err != nil {
+			return errors.Wrap(err, "parsing channelID from noQuoteWhitelist")
+		}
+
+		noQuoteWhitelist = append(noQuoteWhitelist, id)
+	}
+
 	destinationChannel := tg.InputPeerChannel{
 		ChannelID:  environment.DestChannelID,
 		AccessHash: environment.DestChannelAccessHash,
 	}
 
 	monitorOptions := monitor.Options{
-		Thresholds: monitor.Thresholds{
-			Text:    31,
-			Photo:   23,
-			Forward: 23,
-		},
+		Thresholds: monitor.Thresholds(environment.Thresholds),
 		Chats: monitor.Chats{
 			Sources:      chatsToMonitor,
 			Destinations: []tg.InputPeerClass{&destinationChannel},
 		},
+		NoQuoteWhitelist: noQuoteWhitelist,
 	}
 	monit := monitor.New(monitorOptions, botDB, bot)
 
@@ -217,9 +233,10 @@ func run(ctx context.Context) error {
 		}
 
 		// fmt.Println(msg.Message, p.Channel.ID, p.Channel.AccessHash)
+		// fmt.Println(helpers.FormatObject(msg))
 
 		allowed := slices.ContainsFunc(chatsToMonitor, func(ch tg.InputPeerChannel) bool {
-			if p.Channel.ID != ch.ChannelID {
+			if p.Channel.ID == ch.ChannelID {
 				return true
 			}
 			return false

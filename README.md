@@ -38,6 +38,24 @@ You can obtain your Telegram API ID and API hash from [here](https://my.telegram
 ## Usage
 
 - [How to not get banned?](https://github.com/gotd/td/blob/main/.github/SUPPORT.md#how-to-not-get-banned)
+- <details>
+    <summary>
+      How to change forward thresholds?
+    </summary>
+    <code>
+    export REACTOR_TEXT_THRESHOLD=31
+    export REACTOR_TEXT_THRESHOLD=23
+    export REACTOR_TEXT_THRESHOLD=23
+    </code>
+  </details>
+- <details>
+    <summary>
+      Don't remove author for some channels/users
+    </summary>
+    <code>
+    export REACTOR_NOQUOTE_WHITELIST="123123,233424"
+    </code>
+  </details>
 
 ## Licence
 
