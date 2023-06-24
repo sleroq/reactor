@@ -175,7 +175,7 @@ func (m Monitor) syncReactions(new tg.MessageReactions, msg db.Message, accessHa
 	// Check if we can trust "recent reactions"
 	// If so - save recent reactions
 	if len(new.RecentReactions) == totalReactions {
-		reactions, err = helpers.AsReactions(new.RecentReactions, msg.ID)
+		reactions, err = helpers.AsReactions(new.RecentReactions, msg.ChatID, msg.ID)
 		if err != nil {
 			return nil, errors.Wrap(err, "converting reaction")
 		}
@@ -191,7 +191,7 @@ func (m Monitor) syncReactions(new tg.MessageReactions, msg db.Message, accessHa
 			return nil, errors.Wrap(err, "getting reactions list from telegram")
 		}
 
-		reactions, err = helpers.AsReactions(reactionsList.Reactions, msg.ID)
+		reactions, err = helpers.AsReactions(reactionsList.Reactions, msg.ChatID, msg.ID)
 		if err != nil {
 			return nil, errors.Wrap(err, "converting reaction")
 		}
@@ -272,7 +272,7 @@ func (m Monitor) ReplyMessageRating(
 	if err != nil {
 		return errors.Wrap(err, "getting reactions list for a message")
 	}
-	reactions, err := helpers.AsReactions(reactionsList.Reactions, msg.ID)
+	reactions, err := helpers.AsReactions(reactionsList.Reactions, msg.ChatID, msg.ID)
 	if err != nil {
 		return errors.Wrap(err, "converting reaction")
 	}

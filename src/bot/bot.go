@@ -120,7 +120,7 @@ func (b Bot) GetMessagesReactions(chat db.Chat, messages []db.Message) (
 }
 
 func (b Bot) GetReactionsList(msg db.Message, accessHash int64) (*tg.MessagesMessageReactionsList, error) {
-	fmt.Println("Requesting reactions list")
+	fmt.Println("Requesting reactions list for message with id", msg.ID)
 	reactionsList, err := b.api.MessagesGetMessageReactionsList(
 		b.ctx,
 		&tg.MessagesGetMessageReactionsListRequest{

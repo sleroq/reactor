@@ -28,7 +28,7 @@ export REACTOR_PHONE=""
 export REACTOR_APP_ID=""
 export REACTOR_APP_HASH=""
 export REACTOR_SESSION_DIR=./session
-export REACTOR_CHAT_IDS="123123,23123" # Chat to monitor (must be a supergroup)
+export REACTOR_CHAT_IDS="123123,23123"
 export REACTOR_CHANNEL_ID=""
 export REACTOR_CHANNEL_ACCESS_HASH=""
 ```
