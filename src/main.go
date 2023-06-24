@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	env "github.com/Netflix/go-env"
 	pebbledb "github.com/cockroachdb/pebble"
 	"github.com/go-faster/errors"
 	boltstor "github.com/gotd/contrib/bbolt"
@@ -18,14 +19,16 @@ import (
 	"github.com/gotd/td/telegram/updates"
 	"github.com/gotd/td/tg"
 	_ "github.com/mattn/go-sqlite3"
-	"github.com/sleroq/memeq/src/bot"
-	"github.com/sleroq/memeq/src/db"
-	monitor "github.com/sleroq/memeq/src/monitor"
+	"github.com/sleroq/reactor/src/bot"
+	"github.com/sleroq/reactor/src/db"
+	monitor "github.com/sleroq/reactor/src/monitor"
 	"go.etcd.io/bbolt"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"golang.org/x/exp/slices"
 	"golang.org/x/time/rate"
 	lj "gopkg.in/natefinch/lumberjack.v2"
+	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -44,6 +47,17 @@ func sessionFolder(phone string) string {
 	return "phone-" + string(out)
 }
 
+type Environment struct {
+	Phone      string `env:"REACTOR_PHONE,required=true"`
+	AppID      int    `env:"REACTOR_APP_ID,required=true"`
+	AppHash    string `env:"REACTOR_APP_HASH,required=true"`
+	SessionDir string `env:"REACTOR_SESSION_DIR,required=true"`
+
+	ChatsToMonitor        string `env:"REACTOR_CHAT_IDS,required=true"`
+	DestChannelID         int64  `env:"REACTOR_CHANNEL_ID,required=true"`
+	DestChannelAccessHash int64  `env:"REACTOR_CHANNEL_ACCESS_HASH,required=true"`
+}
+
 func run(ctx context.Context) error {
 	var arg struct {
 		FillPeerStorage bool
@@ -51,43 +65,19 @@ func run(ctx context.Context) error {
 	flag.BoolVar(&arg.FillPeerStorage, "fill-peer-storage", false, "fill peer storage")
 	flag.Parse()
 
-	// TG_PHONE is phone number in international format.
-	// Like +4123456789.
-	phone := os.Getenv("TG_PHONE")
-	if phone == "" {
-		return errors.New("no phone")
-	}
-	// APP_HASH, APP_ID is from https://my.telegram.org/.
-	appID, err := strconv.Atoi(os.Getenv("APP_ID"))
+	var environment Environment
+	_, err := env.UnmarshalFromEnviron(&environment)
 	if err != nil {
-		return errors.Wrap(err, " parse app id")
-	}
-	appHash := os.Getenv("APP_HASH")
-	if appHash == "" {
-		return errors.New("no app hash")
+		log.Fatal(err)
 	}
 
 	// Setting up session storage.
 	// This is needed to reuse session and not login every time.
-	sessionDir := filepath.Join("session", sessionFolder(phone))
+	sessionDir := filepath.Join(environment.SessionDir, sessionFolder(environment.Phone))
 	if err := os.MkdirAll(sessionDir, 0700); err != nil {
 		return err
 	}
 	logFilePath := filepath.Join(sessionDir, "log.jsonl")
-
-	selectedChatId, err := strconv.ParseInt(os.Getenv("CHAT_ID"), 10, 64)
-	if err != nil {
-		return errors.New("can't parse CHAT_ID")
-	}
-
-	channelId, err := strconv.ParseInt(os.Getenv("CHANNEL_ID"), 10, 64)
-	if err != nil {
-		return errors.Wrap(err, "can't parse CHANNEL_ID")
-	}
-	channelAccessHash, err := strconv.ParseInt(os.Getenv("CHANNEL_ACCESS_HASH"), 10, 64)
-	if err != nil {
-		return errors.Wrap(err, "can't parse CHANNEL_ACCESS_HASH")
-	}
 
 	fmt.Printf("Storing session in %s, logs in %s\n", sessionDir, logFilePath)
 
@@ -159,7 +149,7 @@ func run(ctx context.Context) error {
 			ratelimit.New(rate.Every(time.Millisecond*100), 5),
 		},
 	}
-	client := telegram.NewClient(appID, appHash, options)
+	client := telegram.NewClient(environment.AppID, environment.AppHash, options)
 	api := client.API()
 
 	// Setting up resolver cache that will use peer storage.
@@ -175,13 +165,22 @@ func run(ctx context.Context) error {
 
 	bot := bot.New(ctx, api)
 
-	// TODO: It's all wrong
-	inputChannel := tg.InputPeerChannel{
-		ChannelID: selectedChatId,
+	chatsIDsToMonitor := strings.Split(environment.ChatsToMonitor, ",")
+	var chatsToMonitor []tg.InputPeerChannel
+	for _, stringID := range chatsIDsToMonitor {
+		id, err := strconv.ParseInt(strings.TrimSpace(stringID), 10, 64)
+		if err != nil {
+			return errors.Wrap(err, "parsing chatID to monitor")
+		}
+
+		chatsToMonitor = append(chatsToMonitor, tg.InputPeerChannel{
+			ChannelID: id,
+		})
 	}
+
 	destinationChannel := tg.InputPeerChannel{
-		ChannelID:  channelId,
-		AccessHash: channelAccessHash,
+		ChannelID:  environment.DestChannelID,
+		AccessHash: environment.DestChannelAccessHash,
 	}
 
 	monitorOptions := monitor.Options{
@@ -191,7 +190,7 @@ func run(ctx context.Context) error {
 			Forward: 23,
 		},
 		Chats: monitor.Chats{
-			Sources:      []tg.InputPeerChannel{inputChannel},
+			Sources:      chatsToMonitor,
 			Destinations: []tg.InputPeerClass{&destinationChannel},
 		},
 	}
@@ -219,7 +218,13 @@ func run(ctx context.Context) error {
 
 		// fmt.Println(msg.Message, p.Channel.ID, p.Channel.AccessHash)
 
-		if p.Channel.ID != selectedChatId {
+		allowed := slices.ContainsFunc(chatsToMonitor, func(ch tg.InputPeerChannel) bool {
+			if p.Channel.ID != ch.ChannelID {
+				return true
+			}
+			return false
+		})
+		if !allowed {
 			return nil
 		}
 
@@ -249,11 +254,11 @@ func run(ctx context.Context) error {
 	})
 
 	// Authentication flow handles authentication process, like prompting for code and 2FA password.
-	flow := auth.NewFlow(Terminal{PhoneNumber: phone}, auth.SendCodeOptions{})
+	flow := auth.NewFlow(Terminal{PhoneNumber: environment.Phone}, auth.SendCodeOptions{})
 
 	return waiter.Run(ctx, func(ctx context.Context) error {
 		go func() {
-			err := monit.Start(time.Minute*10, time.Hour*12)
+			err := monit.Start(time.Minute*20, time.Hour*12)
 			if err != nil {
 				fmt.Printf("Monitoring reactions: %s", err)
 				return

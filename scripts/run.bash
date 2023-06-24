@@ -11,4 +11,4 @@ cd "$(dirname "$SCRIPTPATH")"
 
 source ./scripts/env.bash
 
-./dist/memoq
+./dist/reactor

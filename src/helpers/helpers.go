@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"github.com/go-faster/errors"
 	"github.com/gotd/td/tg"
-	"github.com/sleroq/memeq/src/db"
+	"github.com/sleroq/reactor/src/db"
 	"regexp"
 	"strings"
 	"time"
@@ -31,7 +31,7 @@ func ReactionPositivity(emoticon string) int {
 	case "❤‍🔥":
 		return 10
 	case "😭":
-		return -8
+		return 2
 	case "🤔":
 		return 0
 	case "🆒":

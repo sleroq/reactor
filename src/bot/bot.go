@@ -7,7 +7,7 @@ import (
 	"github.com/gotd/td/telegram/message"
 	"github.com/gotd/td/tg"
 	"github.com/gotd/td/tgerr"
-	"github.com/sleroq/memeq/src/db"
+	"github.com/sleroq/reactor/src/db"
 	"math/rand"
 	"time"
 )

@@ -1,8 +1,9 @@
-module github.com/sleroq/memeq
+module github.com/sleroq/reactor
 
 go 1.20
 
 require (
+	github.com/Netflix/go-env v0.0.0-20220526054621-78278af1949d
 	github.com/cockroachdb/pebble v0.0.0-20230526182609-e7aa90f2a48e
 	github.com/go-faster/errors v0.6.1
 	github.com/gotd/contrib v0.19.0
