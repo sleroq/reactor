@@ -61,8 +61,8 @@ type Environment struct {
 
 	Thresholds struct {
 		Text    int `env:"REACTOR_TEXT_THRESHOLD,default=31"`
-		Photo   int `env:"REACTOR_TEXT_THRESHOLD,default=23"`
-		Forward int `env:"REACTOR_TEXT_THRESHOLD,default=23"`
+		Photo   int `env:"REACTOR_PHOTO_THRESHOLD,default=23"`
+		Forward int `env:"REACTOR_FORWARD_THRESHOLD,default=23"`
 	}
 }
 
