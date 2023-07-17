@@ -4,14 +4,15 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
+	"time"
+
 	"github.com/go-faster/errors"
 	"github.com/gotd/td/bin"
 	"github.com/gotd/td/tg"
 	_ "github.com/mattn/go-sqlite3"
 	"golang.org/x/exp/slices"
-	"strconv"
-	"strings"
-	"time"
 )
 
 func SaveMessage(msg *tg.Message, chatID int64, db *sql.DB) error {

@@ -3,16 +3,18 @@ package monitor
 import (
 	"database/sql"
 	"fmt"
+
 	"github.com/go-faster/errors"
 	"github.com/gotd/td/tg"
 	"github.com/sleroq/reactor/src/bot"
 	"golang.org/x/exp/slices"
 
-	"github.com/sleroq/reactor/src/db"
-	"github.com/sleroq/reactor/src/helpers"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/sleroq/reactor/src/db"
+	"github.com/sleroq/reactor/src/helpers"
 )
 
 type Thresholds struct {
@@ -227,7 +229,19 @@ func (m Monitor) rateMessage(reactions []db.Reaction, msg db.Message) (int, erro
 	usersReactions := make(map[int64]int)
 	for _, reaction := range reactions {
 		if _, ok := usersReactions[reaction.UserID]; !ok {
-			usersReactions[reaction.UserID] = helpers.ReactionPositivity(reaction.Emoticon)
+			emotePositivity := 8 // FIXME: Hardcoded value
+
+			if reaction.DocumentID != 0 {
+				usersReactions[reaction.UserID] = emotePositivity
+				continue
+			}
+
+			emotePositivity, err := helpers.ReactionPositivity(reaction.Emoticon)
+			if err != nil {
+				fmt.Println("error getting reaction positivity:", err, "for message id:", msg.ID)
+				emotePositivity = 1
+			}
+			usersReactions[reaction.UserID] = emotePositivity
 		}
 	}
 
