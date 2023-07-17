@@ -4,6 +4,14 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
 	"github.com/Netflix/go-env"
 	pebbledb "github.com/cockroachdb/pebble"
 	"github.com/go-faster/errors"
@@ -28,13 +36,6 @@ import (
 	"golang.org/x/exp/slices"
 	"golang.org/x/time/rate"
 	lj "gopkg.in/natefinch/lumberjack.v2"
-	"log"
-	"os"
-	"os/signal"
-	"path/filepath"
-	"strconv"
-	"strings"
-	"time"
 )
 
 func sessionFolder(phone string) string {
@@ -275,7 +276,7 @@ func run(ctx context.Context) error {
 
 	return waiter.Run(ctx, func(ctx context.Context) error {
 		go func() {
-			err := monit.Start(time.Minute*20, time.Hour*12)
+			err := monit.Start(time.Minute*20, time.Hour*24)
 			if err != nil {
 				fmt.Printf("Monitoring reactions: %s", err)
 				return

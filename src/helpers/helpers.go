@@ -2,168 +2,100 @@ package helpers
 
 import (
 	"fmt"
-	"github.com/go-faster/errors"
-	"github.com/gotd/td/tdp"
-	"github.com/gotd/td/tg"
-	"github.com/sleroq/reactor/src/db"
 	"reflect"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/go-faster/errors"
+	"github.com/gotd/td/tdp"
+	"github.com/gotd/td/tg"
+	"github.com/sleroq/reactor/src/db"
 )
+
+var ratingTable = map[string]int{
+	"❤":     9,
+	"👍":     8,
+	"🤯":     4,
+	"🥰":     9,
+	"😢":     -6,
+	"🍓":     6,
+	"🔥":     9,
+	"❤‍🔥":   10,
+	"😭":     2,
+	"🤔":     2,
+	"🆒":     7,
+	"😎":     7,
+	"💯":     9,
+	"🤝":     8,
+	"😨":     -7,
+	"😱":     -8,
+	"😡":     -9,
+	"🤬":     -10,
+	"😁":     8,
+	"👏":     8,
+	"👻":     3,
+	"👎":     -8,
+	"🎉":     9,
+	"🤩":     9,
+	"🤮":     -10,
+	"💩":     -5,
+	"🙏":     5,
+	"👌":     7,
+	"🕊":     6,
+	"🤡":     -3,
+	"🥱":     -6,
+	"🥴":     -2,
+	"🐳":     5,
+	"🌚":     -2,
+	"🌭":     4,
+	"😆":     9,
+	"⚡️":    6,
+	"🍌":     5,
+	"🏆":     9,
+	"💔":     -8,
+	"🖕":     -10,
+	"🤨":     -1,
+	"😐":     -3,
+	"🍾":     8,
+	"💋":     9,
+	"😈":     -6,
+	"😴":     -3,
+	"🤓":     3,
+	"👨‍💻":   6,
+	"👀":     1,
+	"🎃":     -2,
+	"💘":     9,
+	"🙈":     -2,
+	"😇":     8,
+	"✍️":    2,
+	"🤗":     9,
+	"🫡":     -3,
+	"🎅":     4,
+	"🎄":     4,
+	"☃️":    -2,
+	"💅":     -1,
+	"🤪":     -4,
+	"🗿":     -1,
+	"🙉":     -2,
+	"😘":     9,
+	"🦄":     4,
+	"💊":     -4,
+	"🙊":     -2,
+	"👾":     8,
+	"🤷‍♂️":  -1,
+	"🤷‍":    -1,
+	"️🤷‍♀️": -1,
+}
 
 // ReactionPositivity returns rating on scale from -10 to 10
 // for any of Telegram reaction emojis
-func ReactionPositivity(emoticon string) int {
-	switch emoticon {
-	case "❤":
-		return 9
-	case "👍":
-		return 8
-	case "🤯":
-		return 2
-	case "🥰":
-		return 9
-	case "😢":
-		return -6
-	case "🍓":
-		return 6
-	case "🔥":
-		return 9
-	case "❤‍🔥":
-		return 10
-	case "😭":
-		return 2
-	case "🤔":
-		return 0
-	case "🆒":
-		return 7
-	case "😎":
-		return 7
-	case "💯":
-		return 9
-	case "🤝":
-		return 8
-	case "😨":
-		return -7
-	case "😱":
-		return -8
-	case "😡":
-		return -9
-	case "🤬":
-		return -10
-	case "😁":
-		return 8
-	case "👏":
-		return 8
-	case "👻":
-		return 3
-	case "👎":
-		return -8
-	case "🎉":
-		return 9
-	case "🤩":
-		return 9
-	case "🤮":
-		return -10
-	case "💩":
-		return -5
-	case "🙏":
-		return 5
-	case "👌":
-		return 7
-	case "🕊":
-		return 6
-	case "🤡":
-		return -3
-	case "🥱":
-		return -4
-	case "🥴":
-		return -2
-	case "🐳":
-		return 5
-	case "🌚":
-		return -2
-	case "🌭":
-		return 4
-	case "😆":
-		return 9
-	case "⚡️":
-		return 3
-	case "🍌":
-		return 5
-	case "🏆":
-		return 9
-	case "💔":
-		return -10
-	case "🖕":
-		return -10
-	case "🤨":
-		return -1
-	case "😐":
-		return -1
-	case "🍾":
-		return 8
-	case "💋":
-		return 9
-	case "😈":
-		return -6
-	case "😴":
-		return -3
-	case "🤓":
-		return 6
-	case "👨‍💻":
-		return 6
-	case "👀":
-		return -1
-	case "🎃":
-		return -2
-	case "💘":
-		return 9
-	case "🙈":
-		return -2
-	case "😇":
-		return 8
-	case "✍️":
-		return -1
-	case "🤗":
-		return 9
-	case "🫡":
-		return -3
-	case "🎅":
-		return -2
-	case "🎄":
-		return -2
-	case "☃️":
-		return -2
-	case "💅":
-		return -1
-	case "🤪":
-		return -4
-	case "🗿":
-		return -1
-	case "🙉":
-		return -2
-	case "😘":
-		return 9
-	case "🦄":
-		return -2
-	case "💊":
-		return -4
-	case "🙊":
-		return -2
-	case "👾":
-		return -3
-	case "🤷‍♂️":
-		return -1
-	case "🤷‍":
-		return -1
-	case "️🤷‍♀️":
-		return -1
-	default:
-		fmt.Printf(`Warning: Unknown emoticon: "%s"`, emoticon)
-		return 1
+func ReactionPositivity(emoticon string) (int, error) {
+	if rating, ok := ratingTable[emoticon]; ok {
+		return rating, nil
 	}
+
+	return 0, errors.Errorf("Unknown emoticon: %s", emoticon)
 }
 
 var GOOD_WORDS = []string{

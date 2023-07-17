@@ -3,13 +3,14 @@ package bot
 import (
 	"context"
 	"fmt"
+	"math/rand"
+	"time"
+
 	"github.com/go-faster/errors"
 	"github.com/gotd/td/telegram/message"
 	"github.com/gotd/td/tg"
 	"github.com/gotd/td/tgerr"
 	"github.com/sleroq/reactor/src/db"
-	"math/rand"
-	"time"
 )
 
 // Part function splits slice on specified position
