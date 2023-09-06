@@ -308,3 +308,12 @@ func FormatObject(input interface{}) string {
 	}
 	return tdp.Format(o)
 }
+
+func ReplyAsMessageReply(reply tg.MessageReplyHeaderClass) (*tg.MessageReplyHeader, error) {
+	switch v := reply.(type) {
+	case *tg.MessageReplyHeader: // messageReplyHeader#a6d57763
+		return v, nil
+	default:
+		return nil, fmt.Errorf("unexpected reply type: %T", reply)
+	}
+}

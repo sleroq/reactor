@@ -52,6 +52,14 @@ func SaveMessage(msg *tg.Message, chatID int64, db *sql.DB) error {
 		hasPhoto = true
 	}
 
+	var reply *tg.MessageReplyHeader
+	switch v := msg.ReplyTo.(type) {
+	case *tg.MessageReplyHeader: // messageReplyHeader#a6d57763
+		reply = v
+	default:
+		return fmt.Errorf("unexpected reply type: %T", reply)
+	}
+
 	_, err := db.Exec(`
 		insert into messages (
 		    id,
@@ -79,7 +87,7 @@ func SaveMessage(msg *tg.Message, chatID int64, db *sql.DB) error {
 		msg.ID,
 		sentDate,
 		chatID,
-		msg.ReplyTo.ReplyToMsgID,
+		reply.ReplyToMsgID,
 		fwdFromUser,
 		fwdFromChannel,
 		hasPhoto,

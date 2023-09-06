@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/sleroq/reactor/src/helpers"
 	"log"
 	"os"
 	"os/signal"
@@ -233,8 +234,8 @@ func run(ctx context.Context) error {
 			return nil
 		}
 
-		// fmt.Println(msg.Message, p.Channel.ID, p.Channel.AccessHash)
-		// fmt.Println(helpers.FormatObject(msg))
+		fmt.Println(msg.Message, p.Channel.ID, p.Channel.AccessHash)
+		fmt.Println(helpers.FormatObject(msg))
 
 		allowed := slices.ContainsFunc(chatsToMonitor, func(ch tg.InputPeerChannel) bool {
 			if p.Channel.ID == ch.ChannelID {
@@ -258,8 +259,14 @@ func run(ctx context.Context) error {
 		}
 
 		if strings.HasPrefix(msg.Message, "/r") {
-			if msg.ReplyTo.ReplyToMsgID != 0 {
-				err = monit.ReplyMessageRating(e, u, msg.ReplyTo.ReplyToMsgID, p.Channel)
+			reply, err := helpers.ReplyAsMessageReply(msg.ReplyTo)
+			if err != nil {
+				fmt.Printf("parsing reply: %s\n", err)
+				return errors.Wrap(err, "parsing reply")
+			}
+
+			if reply.ReplyToMsgID != 0 {
+				err = monit.ReplyMessageRating(e, u, reply.ReplyToMsgID, p.Channel)
 				if err != nil {
 					fmt.Println(err)
 					return errors.Wrap(err, "replying with message rating")
