@@ -341,7 +341,7 @@ func main() {
 	defer cancel()
 
 	if err := run(ctx); err != nil {
-		if errors.Is(err, context.Canceled) && ctx.Err() == context.Canceled {
+		if errors.Is(err, context.Canceled) && errors.Is(ctx.Err(), context.Canceled) {
 			fmt.Println("\rClosed")
 			os.Exit(0)
 		}
