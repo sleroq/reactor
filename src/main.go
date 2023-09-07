@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"github.com/sleroq/reactor/src/helpers"
 	"log"
 	"os"
 	"os/signal"
@@ -234,8 +233,8 @@ func run(ctx context.Context) error {
 			return nil
 		}
 
-		fmt.Println(msg.Message, p.Channel.ID, p.Channel.AccessHash)
-		fmt.Println(helpers.FormatObject(msg))
+		//fmt.Println(msg.Message, p.Channel.ID, p.Channel.AccessHash)
+		//fmt.Println(helpers.FormatObject(msg))
 
 		allowed := slices.ContainsFunc(chatsToMonitor, func(ch tg.InputPeerChannel) bool {
 			if p.Channel.ID == ch.ChannelID {
@@ -252,19 +251,28 @@ func run(ctx context.Context) error {
 			return errors.Wrap(err, "saving chat")
 		}
 
-		err = db.SaveMessage(msg, p.Channel.ID, botDB)
+		_, err = db.SaveMessage(msg, p.Channel.ID, botDB)
 		if err != nil {
 			fmt.Println(err)
 			return errors.Wrap(err, "saving message")
 		}
 
 		if strings.HasPrefix(msg.Message, "/r") {
-			reply, err := helpers.ReplyAsMessageReply(msg.ReplyTo)
-			if err != nil {
-				fmt.Printf("parsing reply: %s\n", err)
-				return errors.Wrap(err, "parsing reply")
+			if msg.ReplyTo == nil {
+				return nil
 			}
 
+			var reply *tg.MessageReplyHeader
+			switch v := msg.ReplyTo.(type) {
+			case *tg.MessageReplyHeader: // messageReplyHeader#a6d57763
+				reply = v
+				break
+			case *tg.MessageReplyStoryHeader:
+				fmt.Printf("fucking story - unexpected reply type: %T", reply)
+				return fmt.Errorf("unexpected reply type: %T", reply)
+			default:
+				return fmt.Errorf("unexpected reply type: %T", reply)
+			}
 			if reply.ReplyToMsgID != 0 {
 				err = monit.ReplyMessageRating(e, u, reply.ReplyToMsgID, p.Channel)
 				if err != nil {
@@ -282,14 +290,6 @@ func run(ctx context.Context) error {
 	flow := auth.NewFlow(Terminal{PhoneNumber: environment.Phone}, auth.SendCodeOptions{})
 
 	return waiter.Run(ctx, func(ctx context.Context) error {
-		go func() {
-			err := monit.Start(time.Minute*20, time.Hour*24)
-			if err != nil {
-				fmt.Printf("Monitoring reactions: %s", err)
-				return
-			}
-		}()
-
 		// Spawning main goroutine.
 		if err := client.Run(ctx, func(ctx context.Context) error {
 			// Perform auth if no session is available.
@@ -328,6 +328,17 @@ func run(ctx context.Context) error {
 
 			// Waiting until context is done.
 			fmt.Println("Listening for updates. Interrupt (Ctrl+C) to stop.")
+
+			go func() {
+				time.Sleep(time.Second * 10)
+
+				err := monit.Start(time.Minute*40, time.Hour*24)
+				if err != nil {
+					fmt.Printf("Monitoring reactions: %s", err)
+					return
+				}
+			}()
+
 			return updatesRecovery.Run(ctx, api, self.ID, updates.AuthOptions{
 				IsBot: self.Bot,
 				OnStart: func(ctx context.Context) {

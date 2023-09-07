@@ -198,3 +198,36 @@ func (b Bot) GetMessageText(chat tg.InputChannel, msgID int) (string, error) {
 
 	return msg, nil
 }
+
+func (b Bot) GetHistory(chatId int64, accessHash int64, limit int, offsetId int) ([]tg.MessageClass, error) {
+	messages, err := b.api.MessagesGetHistory(
+		b.ctx,
+		&tg.MessagesGetHistoryRequest{
+			Peer: &tg.InputPeerChannel{
+				ChannelID:  chatId,
+				AccessHash: accessHash,
+			},
+			Limit:      limit,
+			OffsetID:   offsetId,
+			OffsetDate: 0,
+			MinID:      0,
+			MaxID:      0,
+			Hash:       0,
+		},
+	)
+	if err != nil {
+		return nil, errors.Wrap(err, "getting messages from telegram")
+	}
+
+	var messageClasses []tg.MessageClass
+	switch v := messages.(type) {
+	case *tg.MessagesMessages: // messages.messages#8c718e87
+		messageClasses = v.Messages
+	case *tg.MessagesChannelMessages: // messages.channelMessages#c776ba4e
+		messageClasses = v.Messages
+	default:
+		return nil, fmt.Errorf("unexpected messages type: %v %T", v, v)
+	}
+
+	return messageClasses, nil
+}

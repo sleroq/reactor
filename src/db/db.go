@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -15,7 +16,7 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-func SaveMessage(msg *tg.Message, chatID int64, db *sql.DB) error {
+func SaveMessage(msg *tg.Message, chatID int64, db *sql.DB) (Message, error) {
 	sentDate := time.Unix(int64(msg.Date), 0)
 
 	var userId int64
@@ -25,9 +26,9 @@ func SaveMessage(msg *tg.Message, chatID int64, db *sql.DB) error {
 	case *tg.PeerChannel:
 	case nil:
 		// Not saving this shit (sorry, too lazy)
-		return nil
+		return Message{}, nil
 	default:
-		return fmt.Errorf("unexpected message sender type: %s", v)
+		return Message{}, fmt.Errorf("unexpected message sender type: %s", v)
 	}
 
 	var fwdFromUser int64
@@ -43,7 +44,7 @@ func SaveMessage(msg *tg.Message, chatID int64, db *sql.DB) error {
 	case nil:
 		break
 	default:
-		return fmt.Errorf("unexpected forward peer sender type %s", v)
+		return Message{}, fmt.Errorf("unexpected forward peer sender type %s", v)
 	}
 
 	hasPhoto := false
@@ -52,12 +53,18 @@ func SaveMessage(msg *tg.Message, chatID int64, db *sql.DB) error {
 		hasPhoto = true
 	}
 
-	var reply *tg.MessageReplyHeader
-	switch v := msg.ReplyTo.(type) {
-	case *tg.MessageReplyHeader: // messageReplyHeader#a6d57763
-		reply = v
-	default:
-		return fmt.Errorf("unexpected reply type: %T", reply)
+	replyID := 0
+	if msg.ReplyTo != nil {
+		switch v := msg.ReplyTo.(type) {
+		case *tg.MessageReplyHeader: // messageReplyHeader#a6d57763
+			replyID = v.ReplyToMsgID
+			break
+		case *tg.MessageReplyStoryHeader:
+			fmt.Println("fucking story?", v.GetStoryID(), v.UserID)
+			return Message{}, fmt.Errorf("unexpected reply type: %T", v)
+		default:
+			return Message{}, fmt.Errorf("unexpected reply type: %T", v)
+		}
 	}
 
 	_, err := db.Exec(`
@@ -87,7 +94,7 @@ func SaveMessage(msg *tg.Message, chatID int64, db *sql.DB) error {
 		msg.ID,
 		sentDate,
 		chatID,
-		reply.ReplyToMsgID,
+		replyID,
 		fwdFromUser,
 		fwdFromChannel,
 		hasPhoto,
@@ -95,10 +102,23 @@ func SaveMessage(msg *tg.Message, chatID int64, db *sql.DB) error {
 		msg.Message,
 		msg.GroupedID)
 	if err != nil {
-		return errors.Wrap(err, "saving message to database")
+		return Message{}, errors.Wrap(err, "saving message to database")
 	}
 
-	return nil
+	return Message{
+		ID:             msg.ID,
+		UpdatedAt:      time.Now(),
+		SentDate:       sentDate,
+		ChatID:         chatID,
+		Forwarded:      false,
+		FwdFromUser:    fwdFromUser,
+		FwdFromChannel: fwdFromChannel,
+		WithPhoto:      hasPhoto,
+		ReplyTo:        replyID,
+		UserID:         userId,
+		Body:           msg.Message,
+		GroupedID:      msg.GroupedID,
+	}, nil
 }
 
 func UpdateMessageBody(db *sql.DB, msg Message) error {
@@ -350,7 +370,7 @@ type Message struct {
 	FwdFromUser    int64
 	FwdFromChannel int64
 	WithPhoto      bool
-	ReplyTo        int64
+	ReplyTo        int
 	UserID         int64
 	Body           string
 	GroupedID      int64
@@ -425,6 +445,18 @@ func SetupDB() (*sql.DB, error) {
 		return nil, errors.Wrap(err, "creating reactions table")
 	}
 
+	_, err = db.Exec(`
+		create table if not exists checked_messages (
+			chatId integer not null,
+			messageId integer not null,
+			updatedAt datetime default (datetime('now')),
+			foreign key(messageId, chatId) references messages(id, chatId)
+		);
+
+	`)
+	if err != nil {
+
+	}
 	return db, nil
 }
 
@@ -508,4 +540,67 @@ func GetOnlySavedChats(sources []tg.InputPeerChannel, db *sql.DB) ([]Chat, error
 	}
 
 	return chats, nil
+}
+
+func GetMissedMessagesRanges(chatID int64, db *sql.DB) ([][2]int, error) {
+	// Run query to get all IDs
+	rows, err := db.Query(`
+		-- Select all ids from messages
+		SELECT id 
+		FROM messages
+		where chatId = :chatID
+
+		-- Union all ids from checked_messages that are not found in messages
+		UNION ALL 
+
+		SELECT messageId as id
+		FROM checked_messages
+		where chatId = :chatID;
+	`, chatID)
+	if err != nil {
+		panic(err)
+	}
+
+	// Retrieve all IDs and store them in the slice
+	var ids []int
+	for rows.Next() {
+		var id int
+		err := rows.Scan(&id)
+		if err != nil {
+			panic(err)
+		}
+		ids = append(ids, id)
+	}
+
+	sort.Ints(ids)
+
+	// Check for missing IDs
+	var missingRanges [][2]int
+	for i := 0; i < len(ids)-1; i++ {
+		if ids[i+1]-ids[i] > 1 {
+			missingRange := [2]int{ids[i] + 1, ids[i+1] - 1}
+			missingRanges = append(missingRanges, missingRange)
+		}
+	}
+
+	return missingRanges, nil
+}
+
+func MarkRangeAsChecked(chatID int64, start, end int, db *sql.DB) error {
+	for i := start; i <= end; i++ {
+		_, err := db.Exec(`
+			insert or ignore into checked_messages (
+				chatId,
+				messageId
+			) values (
+				:chatID,
+				:messageID
+			)
+		`, chatID, i)
+		if err != nil {
+			return errors.Wrap(err, "deleting checked message")
+		}
+	}
+
+	return nil
 }
