@@ -1,8 +1,12 @@
 package monitor
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
+	"go.uber.org/zap"
+	"sync"
+
 	"github.com/go-faster/errors"
 	"github.com/gotd/td/tg"
 	"github.com/sleroq/reactor/src/bot"
@@ -36,32 +40,65 @@ type Monitor struct {
 	db      *sql.DB
 	bot     *bot.Bot
 	options Options
+	mu      *sync.Mutex
+	logger  *zap.SugaredLogger
 }
 
-func New(options Options, db *sql.DB, bot *bot.Bot) *Monitor {
+const MsgReqDelay = 5 * time.Second
+const RecoveringDelay = 5 * time.Minute
+
+func New(options Options, db *sql.DB, bot *bot.Bot, parentLogger *zap.SugaredLogger) *Monitor {
+	logger := parentLogger.Named("monitor")
 	return &Monitor{
 		db,
 		bot,
 		options,
+		&sync.Mutex{},
+		logger,
 	}
 }
 
-// Start runs reactions & replies monitor
-// delay - duration between each check
-// ageLimit - duration in which messages will be monitored
-func (m Monitor) Start(delay time.Duration, ageLimit time.Duration) error {
+func (m Monitor) RecoverSync() error {
+	errChan := make(chan error)
+
 	go func() {
-		if err := m.checkForMissedMessages(); err != nil {
-			fmt.Println("error checking for missed messages:", err)
-		}
+		errChan <- m.checkForMissedMessages()
 	}()
 
-	for range time.Tick(delay) {
-		if err := m.checkForNewMessages(ageLimit); err != nil {
-			return err
+	err := <-errChan
+
+	return err
+}
+
+// WatchSync runs reactions & replies monitor
+// delay - duration between each check
+// ageLimit - duration in which messages will be monitored
+func (m Monitor) WatchSync(ctx context.Context, delay time.Duration, ageLimit time.Duration) {
+	go func() {
+		ticker := time.NewTicker(delay)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				m.logger.Info("Stopping WatchSync")
+				return
+			case <-ticker.C:
+				if err := m.checkMessagesSafely(ageLimit); err != nil {
+					m.logger.Errorf("error checking for new messages: %s", err)
+				}
+			}
 		}
-	}
-	return nil
+	}()
+}
+
+// WatchAsync runs reactions & replies monitor
+// with mutex to avoid running multiple instances
+func (m Monitor) checkMessagesSafely(ageLimit time.Duration) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return m.checkForNewMessages(ageLimit)
 }
 
 func (m Monitor) checkForNewMessages(ageLimit time.Duration) error {
@@ -78,20 +115,21 @@ func (m Monitor) checkForNewMessages(ageLimit time.Duration) error {
 			return errors.Wrap(err, "getting messages from database")
 		}
 
+		if len(messages) == 0 {
+			continue
+		}
+
 		err = m.checkMessages(chat, messages)
 		if err != nil {
 			return errors.Wrap(err, "checking messages")
 		}
-
-		// Sleep for 3 seconds to avoid hitting the rate limit
-		time.Sleep(3 * time.Second)
 	}
 
 	return nil
 }
 
 func (m Monitor) checkMessages(chat db.Chat, messages []db.Message) error {
-	reactionUpdates, err := m.bot.GetMessagesReactions(chat, messages)
+	reactionUpdates, err := m.bot.GetMessagesReactions(chat, messages, MsgReqDelay, m.logger)
 	if err != nil {
 		return errors.Wrap(err, "getting reactions for all messages")
 	}
@@ -314,8 +352,16 @@ func (m Monitor) ReplyMessageRating(
 	replyID int,
 	chat *tg.Channel,
 ) error {
+	m.logger.Infof("replying with rating for message %d", replyID)
+
 	msg, err := db.GetMessage(m.db, chat.ID, replyID)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			err = m.bot.Reply(e, u, fmt.Sprint("404"))
+			if err != nil {
+				return errors.Wrap(err, "replying with 404")
+			}
+		}
 		return errors.Wrap(err, "getting saved message")
 	}
 
@@ -347,6 +393,8 @@ func (m Monitor) ReplyMessageRating(
 }
 
 func (m Monitor) checkForMissedMessages() error {
+	logger := m.logger.Named("recovering")
+
 	chats, err := db.GetOnlySavedChats(m.options.Chats.Sources, m.db)
 	if err != nil {
 		return errors.Wrap(err, "getting saved chats from database")
@@ -358,17 +406,18 @@ func (m Monitor) checkForMissedMessages() error {
 			return errors.Wrap(err, "getting missed messages ranges")
 		}
 
-		fmt.Println("missing ranges:", missingRanges)
+		logger.Infof("checking chat %d for missing messages", chat.ID)
+		logger.Debugf("missing ranges: %v", missingRanges)
 
 		for _, missingRange := range missingRanges {
 			start := missingRange[0]
 			limit := missingRange[1] - missingRange[0] + 1
 
-			fmt.Printf("start: %d, limit: %d\n", start, limit)
+			logger.Debugf("start: %d, limit: %d", start, limit)
 
 			// Split range into multiple calls if limit is larger than 100
 			for offset := start; offset < start+limit; offset += 100 {
-				fmt.Println("checking missing range:", missingRange, "with offset:", offset)
+				logger.Debugf("checking missing range: %v with offset: %d", missingRange, offset)
 
 				// Calculate the actual limit for this call based on remaining messages
 				callLimit := limit
@@ -377,8 +426,8 @@ func (m Monitor) checkForMissedMessages() error {
 				} else {
 					callLimit = 100
 
-					fmt.Println("sleeping for 20 minutes")
-					time.Sleep(20 * time.Minute)
+					logger.Debugf("sleeping for %s, to make recovering slow", RecoveringDelay)
+					time.Sleep(RecoveringDelay)
 				}
 
 				part, err := m.bot.GetHistory(chat.ID, chat.AccessHash, callLimit, offset)
@@ -386,7 +435,7 @@ func (m Monitor) checkForMissedMessages() error {
 					return errors.Wrap(err, "getting messages")
 				}
 
-				fmt.Println("got", len(part), "messages")
+				logger.Debugf("got %d messages from telegram", len(part))
 
 				var savedMessages []db.Message
 
@@ -396,8 +445,10 @@ func (m Monitor) checkForMissedMessages() error {
 					case *tg.Message:
 						message = v
 					case *tg.MessageService:
+						logger.Infof("skipping service message: %s", helpers.FormatObject(v))
 						continue
 					case *tg.MessageEmpty:
+						logger.Infof("skipping empty message: %s", helpers.FormatObject(v))
 						continue
 					default:
 						return errors.New("unexpected message type")
@@ -405,6 +456,7 @@ func (m Monitor) checkForMissedMessages() error {
 
 					// If message is not in missing range - skip it
 					if message.ID < missingRange[0] || message.ID > missingRange[1] {
+						logger.Warn("skipping message, because it's not in missing range (how?):", message.ID)
 						continue
 					}
 
@@ -420,9 +472,6 @@ func (m Monitor) checkForMissedMessages() error {
 				if err != nil {
 					return errors.Wrap(err, "checking messages")
 				}
-
-				// Sleep for 3 seconds to avoid hitting the rate limit
-				time.Sleep(3 * time.Second)
 			}
 
 			err = db.MarkRangeAsChecked(chat.ID, missingRange[0], missingRange[1], m.db)
@@ -430,10 +479,10 @@ func (m Monitor) checkForMissedMessages() error {
 				return errors.Wrap(err, "marking range as checked")
 			}
 
-			fmt.Println("finished checking missing range:", missingRange)
+			logger.Infof("finished checking missing range with %d messages", limit)
 
-			fmt.Println("sleeping for 3 hours")
-			time.Sleep(3 * time.Hour)
+			logger.Debugf("sleeping for %s, to make recovering slow", RecoveringDelay)
+			time.Sleep(RecoveringDelay)
 		}
 	}
 
