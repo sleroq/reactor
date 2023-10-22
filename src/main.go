@@ -78,12 +78,12 @@ type Environment struct {
 	}
 
 	CheckFrequency struct {
-		Wide   int `env:"REACTOR_WIDE_FREQUENCY,default=10"`
-		Narrow int `env:"REACTOR_NARROW_FREQUENCY,default=5"`
+		Wide   int `env:"REACTOR_WIDE_FREQUENCY,default=60"`
+		Narrow int `env:"REACTOR_NARROW_FREQUENCY,default=10"`
 	}
 	CheckRange struct {
 		Wide   int `env:"REACTOR_WIDE_RANGE,default=72"`
-		Narrow int `env:"REACTOR_NARROW_RANGE,default=3"`
+		Narrow int `env:"REACTOR_NARROW_RANGE,default=1"`
 	}
 
 	Recover bool `env:"REACTOR_RECOVER,default=true"`
