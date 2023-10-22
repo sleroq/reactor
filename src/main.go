@@ -2,11 +2,9 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"log"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -23,17 +21,15 @@ import (
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/telegram/auth"
 	"github.com/gotd/td/telegram/message/peer"
-	"github.com/gotd/td/telegram/query"
 	"github.com/gotd/td/telegram/updates"
 	"github.com/gotd/td/tg"
 	_ "github.com/mattn/go-sqlite3"
-	"github.com/sleroq/reactor/src/bot"
+	botWrapper "github.com/sleroq/reactor/src/bot"
 	"github.com/sleroq/reactor/src/db"
 	"github.com/sleroq/reactor/src/monitor"
 	"go.etcd.io/bbolt"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"golang.org/x/exp/slices"
 	"golang.org/x/time/rate"
 	lj "gopkg.in/natefinch/lumberjack.v2"
 )
@@ -48,47 +44,60 @@ func sessionFolder(phone string) string {
 	return "phone-" + string(out)
 }
 
+type Int64Slice []int64
+
+func (i *Int64Slice) UnmarshalEnvironmentValue(value string) error {
+	parts := strings.Split(value, ",")
+	for _, part := range parts {
+		number, err := strconv.ParseInt(strings.TrimSpace(part), 10, 64)
+		if err != nil {
+			return err
+		}
+		*i = append(*i, number)
+	}
+
+	return nil
+}
+
 type Environment struct {
 	Phone      string `env:"REACTOR_PHONE,required=true"`
 	AppID      int    `env:"REACTOR_APP_ID,required=true"`
 	AppHash    string `env:"REACTOR_APP_HASH,required=true"`
 	SessionDir string `env:"REACTOR_SESSION_DIR,required=true"`
 
-	ChatsToMonitor        string `env:"REACTOR_CHAT_IDS,required=true"`
-	DestChannelID         int64  `env:"REACTOR_CHANNEL_ID,required=true"`
-	DestChannelAccessHash int64  `env:"REACTOR_CHANNEL_ACCESS_HASH,required=true"`
+	WatchedChatIDs          Int64Slice `env:"REACTOR_CHAT_IDS,required=true"`
+	DestChannelIDs          Int64Slice `env:"REACTOR_CHANNEL_ID,required=true"`
+	DestChannelAccessHashes Int64Slice `env:"REACTOR_CHANNEL_ACCESS_HASH,required=true"`
 
-	NoQuoteWhitelist string `env:"REACTOR_NOQUOTE_WHITELIST"`
+	NoQuoteWhitelistIDs Int64Slice `env:"REACTOR_NOQUOTE_WHITELIST"`
 
 	Thresholds struct {
 		Text    int `env:"REACTOR_TEXT_THRESHOLD,default=31"`
 		Photo   int `env:"REACTOR_PHOTO_THRESHOLD,default=23"`
 		Forward int `env:"REACTOR_FORWARD_THRESHOLD,default=23"`
 	}
+
+	CheckFrequency struct {
+		Wide   int `env:"REACTOR_WIDE_FREQUENCY,default=10"`
+		Narrow int `env:"REACTOR_NARROW_FREQUENCY,default=5"`
+	}
+	CheckRange struct {
+		Wide   int `env:"REACTOR_WIDE_RANGE,default=72"`
+		Narrow int `env:"REACTOR_NARROW_RANGE,default=3"`
+	}
+
+	Recover bool `env:"REACTOR_RECOVER,default=true"`
 }
 
-func run(ctx context.Context) error {
-	var arg struct {
-		FillPeerStorage bool
-	}
-	flag.BoolVar(&arg.FillPeerStorage, "fill-peer-storage", false, "fill peer storage")
-	flag.Parse()
+type Options struct {
+	Env              Environment
+	ChatsToMonitor   []tg.InputPeerChannel
+	NoQuoteWhitelist []int64
+	DestChannels     []tg.InputPeerClass
+}
 
-	var environment Environment
-	_, err := env.UnmarshalFromEnviron(&environment)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Setting up session storage.
-	// This is needed to reuse session and not login every time.
-	sessionDir := filepath.Join(environment.SessionDir, sessionFolder(environment.Phone))
-	if err := os.MkdirAll(sessionDir, 0700); err != nil {
-		return err
-	}
-	logFilePath := filepath.Join(sessionDir, "log.jsonl")
-
-	fmt.Printf("Storing session in %s, logs in %s\n", sessionDir, logFilePath)
+func prepareInternalLogger(dir string) *zap.Logger {
+	logFilePath := filepath.Join(dir, "log.jsonl")
 
 	// Setting up logging to file with rotation.
 	//
@@ -104,7 +113,18 @@ func run(ctx context.Context) error {
 		logWriter,
 		zap.DebugLevel,
 	)
-	lg := zap.New(logCore)
+	return zap.New(logCore)
+}
+
+func run(ctx context.Context, options Options, logger *zap.SugaredLogger) (err error) {
+	// Setting up session storage.
+	// This is needed to reuse session and not login every time.
+	sessionDir := filepath.Join(options.Env.SessionDir, sessionFolder(options.Env.Phone))
+	if err := os.MkdirAll(sessionDir, 0700); err != nil {
+		return errors.Wrap(err, "create session dir")
+	}
+
+	lg := prepareInternalLogger(sessionDir)
 	defer func() { _ = lg.Sync() }()
 
 	// So, we are storing session information in current directory, under subdirectory "session/phone_hash"
@@ -143,11 +163,11 @@ func run(ctx context.Context) error {
 	waiter := floodwait.NewWaiter().WithCallback(func(ctx context.Context, wait floodwait.FloodWait) {
 		// Notifying about flood wait.
 		lg.Warn("Flood wait", zap.Duration("wait", wait.Duration))
-		fmt.Println("Got FLOOD_WAIT. Will retry after", wait.Duration)
+		logger.Warn("Flood wait", zap.Duration("wait", wait.Duration))
 	})
 
 	// Filling client options.
-	options := telegram.Options{
+	clientOptions := telegram.Options{
 		Logger:         lg,              // Passing logger for observability.
 		SessionStorage: sessionStorage,  // Setting up session sessionStorage to store auth data.
 		UpdateHandler:  updatesRecovery, // Setting up handler for updates from server.
@@ -158,7 +178,7 @@ func run(ctx context.Context) error {
 			ratelimit.New(rate.Every(time.Millisecond*100), 5),
 		},
 	}
-	client := telegram.NewClient(environment.AppID, environment.AppHash, options)
+	client := telegram.NewClient(options.Env.AppID, options.Env.AppHash, clientOptions)
 	api := client.API()
 
 	// Setting up resolver cache that will use peer storage.
@@ -170,127 +190,45 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return errors.Wrap(err, "setting up the database")
 	}
-	defer botDB.Close()
 
-	bot := bot.New(ctx, api)
-
-	chatsIDsToMonitor := strings.Split(environment.ChatsToMonitor, ",")
-	var chatsToMonitor []tg.InputPeerChannel
-	for _, stringID := range chatsIDsToMonitor {
-		id, err := strconv.ParseInt(strings.TrimSpace(stringID), 10, 64)
-		if err != nil {
-			return errors.Wrap(err, "parsing chatID to monitor")
+	defer func() {
+		if closeErr := botDB.Close(); closeErr != nil {
+			if err != nil {
+				err = errors.Wrap(err, closeErr.Error())
+			} else {
+				err = closeErr
+			}
 		}
+	}()
+	// Authentication flow handles authentication process, like prompting for code and 2FA password.
 
-		chatsToMonitor = append(chatsToMonitor, tg.InputPeerChannel{
-			ChannelID: id,
-		})
-	}
+	flow := auth.NewFlow(Terminal{PhoneNumber: options.Env.Phone}, auth.SendCodeOptions{})
 
-	noQuoteIDs := strings.Split(environment.NoQuoteWhitelist, ",")
-	var noQuoteWhitelist []int64
-	for _, stringID := range noQuoteIDs {
-		id, err := strconv.ParseInt(strings.TrimSpace(stringID), 10, 64)
-		if err != nil {
-			return errors.Wrap(err, "parsing channelID from noQuoteWhitelist")
-		}
+	bot := botWrapper.New(ctx, api)
 
-		noQuoteWhitelist = append(noQuoteWhitelist, id)
-	}
-
-	destinationChannel := tg.InputPeerChannel{
-		ChannelID:  environment.DestChannelID,
-		AccessHash: environment.DestChannelAccessHash,
-	}
-
-	monitorOptions := monitor.Options{
-		Thresholds: monitor.Thresholds(environment.Thresholds),
+	watcherOptions := monitor.Options{
+		Thresholds: monitor.Thresholds(options.Env.Thresholds),
 		Chats: monitor.Chats{
-			Sources:      chatsToMonitor,
-			Destinations: []tg.InputPeerClass{&destinationChannel},
+			Sources:      options.ChatsToMonitor,
+			Destinations: options.DestChannels,
 		},
-		NoQuoteWhitelist: noQuoteWhitelist,
+		NoQuoteWhitelist: options.NoQuoteWhitelist,
 	}
-	monit := monitor.New(monitorOptions, botDB, bot)
+
+	watcher := monitor.New(watcherOptions, botDB, bot, logger)
 
 	// Registering handler for new private messages in chats.
 	dispatcher.OnNewChannelMessage(func(ctx context.Context, e tg.Entities, u *tg.UpdateNewChannelMessage) error {
-		msg, ok := u.Message.(*tg.Message)
-		if !ok {
-			return nil
-		}
-
-		// Use PeerID to find peer because *Short updates does not contain any entities, so it necessary to
-		// store some entities.
-		//
-		// Storage can be filled using PeerCollector (i.e. fetching all dialogs first).
-		p, err := storage.FindPeer(ctx, peerDB, msg.GetPeerID())
+		handlerCtx := HandlerContext{ctx: ctx, e: e, u: u, peerDB: peerDB, botDB: botDB, watcher: watcher}
+		childLogger := logger.Named("channel_message_handler")
+		err := ChannelMessageHandler(handlerCtx, options, childLogger)
 		if err != nil {
-			return err
+			logger.Errorw("Error in channel message handler", "error", err)
 		}
-
-		if p.Channel == nil {
-			return nil
-		}
-
-		//fmt.Println(msg.Message, p.Channel.ID, p.Channel.AccessHash)
-		//fmt.Println(helpers.FormatObject(msg))
-
-		allowed := slices.ContainsFunc(chatsToMonitor, func(ch tg.InputPeerChannel) bool {
-			if p.Channel.ID == ch.ChannelID {
-				return true
-			}
-			return false
-		})
-		if !allowed {
-			return nil
-		}
-
-		err = db.SaveChat(p.Channel, botDB)
-		if err != nil {
-			return errors.Wrap(err, "saving chat")
-		}
-
-		_, err = db.SaveMessage(msg, p.Channel.ID, botDB)
-		if err != nil {
-			fmt.Println(err)
-			return errors.Wrap(err, "saving message")
-		}
-
-		if strings.HasPrefix(msg.Message, "/r") {
-			if msg.ReplyTo == nil {
-				return nil
-			}
-
-			var reply *tg.MessageReplyHeader
-			switch v := msg.ReplyTo.(type) {
-			case *tg.MessageReplyHeader: // messageReplyHeader#a6d57763
-				reply = v
-				break
-			case *tg.MessageReplyStoryHeader:
-				fmt.Printf("fucking story - unexpected reply type: %T", reply)
-				return fmt.Errorf("unexpected reply type: %T", reply)
-			default:
-				return fmt.Errorf("unexpected reply type: %T", reply)
-			}
-			if reply.ReplyToMsgID != 0 {
-				err = monit.ReplyMessageRating(e, u, reply.ReplyToMsgID, p.Channel)
-				if err != nil {
-					fmt.Println(err)
-					return errors.Wrap(err, "replying with message rating")
-				}
-			}
-
-		}
-
-		return nil
+		return err
 	})
 
-	// Authentication flow handles authentication process, like prompting for code and 2FA password.
-	flow := auth.NewFlow(Terminal{PhoneNumber: environment.Phone}, auth.SendCodeOptions{})
-
 	return waiter.Run(ctx, func(ctx context.Context) error {
-		// Spawning main goroutine.
 		if err := client.Run(ctx, func(ctx context.Context) error {
 			// Perform auth if no session is available.
 			if err := client.Auth().IfNecessary(ctx, flow); err != nil {
@@ -308,7 +246,7 @@ func run(ctx context.Context) error {
 				// Username is optional.
 				name = fmt.Sprintf("%s (@%s)", name, self.Username)
 			}
-			fmt.Println("Current user:", name)
+			logger.Info("Current user:", name)
 
 			lg.Info("Login",
 				zap.String("first_name", self.FirstName),
@@ -317,33 +255,20 @@ func run(ctx context.Context) error {
 				zap.Int64("id", self.ID),
 			)
 
-			if arg.FillPeerStorage {
-				fmt.Println("Filling peer storage from dialogs to cache entities")
-				collector := storage.CollectPeers(peerDB)
-				if err := collector.Dialogs(ctx, query.GetDialogs(api).Iter()); err != nil {
-					return errors.Wrap(err, "collect peers")
+			if options.Env.Recover {
+				// Handling missed messages
+				err = watcher.RecoverSync()
+				if err != nil {
+					return errors.Wrap(err, "recovering missed messages")
 				}
-				fmt.Println("Filled")
 			}
 
-			// Waiting until context is done.
-			fmt.Println("Listening for updates. Interrupt (Ctrl+C) to stop.")
-
-			go func() {
-				time.Sleep(time.Second * 10)
-
-				err := monit.Start(time.Minute*40, time.Hour*24)
-				if err != nil {
-					fmt.Printf("Monitoring reactions: %s", err)
-					return
-				}
-			}()
+			startMonitoring(ctx, watcher, options)
 
 			return updatesRecovery.Run(ctx, api, self.ID, updates.AuthOptions{
 				IsBot: self.Bot,
 				OnStart: func(ctx context.Context) {
-					fmt.Println("Update recovery initialized and started, listening for events")
-
+					logger.Info("Update recovery initialized and started, listening for events")
 				},
 			})
 		}); err != nil {
@@ -354,19 +279,66 @@ func run(ctx context.Context) error {
 	})
 }
 
-func main() {
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer cancel()
+func startMonitoring(ctx context.Context, watcher *monitor.Monitor, options Options) {
+	// Start monitoring wide range
+	wideFrequency := time.Duration(options.Env.CheckFrequency.Wide) * time.Minute
+	wideRange := time.Duration(options.Env.CheckRange.Wide) * time.Hour
+	watcher.WatchSync(ctx, wideFrequency, wideRange)
 
-	if err := run(ctx); err != nil {
-		if errors.Is(err, context.Canceled) && errors.Is(ctx.Err(), context.Canceled) {
-			fmt.Println("\rClosed")
-			os.Exit(0)
+	// Start monitoring narrow range
+	narrowFrequency := time.Duration(options.Env.CheckFrequency.Narrow) * time.Minute
+	narrowRange := time.Duration(options.Env.CheckRange.Narrow) * time.Hour
+	watcher.WatchSync(ctx, narrowFrequency, narrowRange)
+}
+
+func prepareOptions() (options Options, err error) {
+	var environment Environment
+	_, err = env.UnmarshalFromEnviron(&environment)
+	if err != nil {
+		return options, errors.Wrap(err, "unmarshalling environment")
+	}
+	options.Env = environment
+
+	for _, chatID := range environment.WatchedChatIDs {
+		channel := tg.InputPeerChannel{
+			ChannelID: chatID,
 		}
-		_, _ = fmt.Fprintf(os.Stderr, "Error: %+v\n", err)
-		os.Exit(1)
-	} else {
-		fmt.Println("Done")
-		os.Exit(0)
+		options.ChatsToMonitor = append(options.ChatsToMonitor, channel)
+	}
+
+	for _, chatID := range environment.NoQuoteWhitelistIDs {
+		options.NoQuoteWhitelist = append(options.NoQuoteWhitelist, chatID)
+	}
+
+	if len(environment.DestChannelIDs) != len(environment.DestChannelAccessHashes) {
+		return options, errors.New("dest channel id and access hash should have the same length")
+	}
+	for i, channelID := range environment.DestChannelIDs {
+		channel := tg.InputPeerChannel{
+			ChannelID:  channelID,
+			AccessHash: environment.DestChannelAccessHashes[i],
+		}
+		options.DestChannels = append(options.DestChannels, &channel)
+	}
+
+	return options, nil
+}
+
+func main() {
+	prodLogger, err := zap.NewDevelopment()
+	logger := prodLogger.Sugar()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	options, err := prepareOptions()
+	if err != nil {
+		logger.Fatal(err)
+	}
+
+	ctx := context.Background()
+
+	if err := run(ctx, options, logger); err != nil {
+		logger.Fatal("Error", zap.Error(err))
 	}
 }
