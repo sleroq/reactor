@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"fmt"
+	"go.uber.org/zap"
 	"math/rand"
 	"time"
 
@@ -103,7 +104,7 @@ func (b Bot) GetReactions(chatId int64, accessHash int64, messages []int) ([]*tg
 	return reactionUpdates, nil
 }
 
-func (b Bot) GetMessagesReactions(chat db.Chat, messages []db.Message) (
+func (b Bot) GetMessagesReactions(chat db.Chat, messages []db.Message, delay time.Duration, logger *zap.SugaredLogger) (
 	reactions []*tg.UpdateMessageReactions,
 	err error,
 ) {
@@ -122,13 +123,19 @@ func (b Bot) GetMessagesReactions(chat db.Chat, messages []db.Message) (
 		}
 
 		reactions = append(reactions, someReactions...)
+
+		if len(messages) > 0 {
+			logger.Debugw("waiting for next request", "delay", delay)
+			time.Sleep(delay)
+		}
 	}
 
 	return reactions, nil
 }
 
+// GetReactionsList returns reactions list for specified message
+// This functions requests only 100 reactions
 func (b Bot) GetReactionsList(msg db.Message, accessHash int64) (*tg.MessagesMessageReactionsList, error) {
-	fmt.Println("Requesting reactions list for message with id", msg.ID)
 	reactionsList, err := b.api.MessagesGetMessageReactionsList(
 		b.ctx,
 		&tg.MessagesGetMessageReactionsListRequest{
@@ -197,4 +204,37 @@ func (b Bot) GetMessageText(chat tg.InputChannel, msgID int) (string, error) {
 	}
 
 	return msg, nil
+}
+
+func (b Bot) GetHistory(chatId int64, accessHash int64, limit int, offsetId int) ([]tg.MessageClass, error) {
+	messages, err := b.api.MessagesGetHistory(
+		b.ctx,
+		&tg.MessagesGetHistoryRequest{
+			Peer: &tg.InputPeerChannel{
+				ChannelID:  chatId,
+				AccessHash: accessHash,
+			},
+			Limit:      limit,
+			OffsetID:   offsetId,
+			OffsetDate: 0,
+			MinID:      0,
+			MaxID:      0,
+			Hash:       0,
+		},
+	)
+	if err != nil {
+		return nil, errors.Wrap(err, "getting messages from telegram")
+	}
+
+	var messageClasses []tg.MessageClass
+	switch v := messages.(type) {
+	case *tg.MessagesMessages: // messages.messages#8c718e87
+		messageClasses = v.Messages
+	case *tg.MessagesChannelMessages: // messages.channelMessages#c776ba4e
+		messageClasses = v.Messages
+	default:
+		return nil, fmt.Errorf("unexpected messages type: %v %T", v, v)
+	}
+
+	return messageClasses, nil
 }
