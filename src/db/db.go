@@ -68,7 +68,7 @@ func SaveMessage(msg *tg.Message, chatID int64, db *sql.DB) (Message, error) {
 	}
 
 	_, err := db.Exec(`
-		insert into messages (
+		insert or ignore into messages (
 		    id,
 		    sentDate,
 		    chatId,
