@@ -245,7 +245,7 @@ func GetMessage(db *sql.DB, chatID int64, msgID int) (Message, error) {
 		return messages[0], nil
 	}
 
-	return Message{}, fmt.Errorf("not found")
+	return Message{}, sql.ErrNoRows
 }
 
 func GetReplies(db *sql.DB, chatID int64, replyTo int) ([]Message, error) {
