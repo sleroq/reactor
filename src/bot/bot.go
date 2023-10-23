@@ -116,7 +116,7 @@ func (b Bot) GetMessagesReactions(chat db.Chat, messages []db.Message, delay tim
 			messageIds = append(messageIds, msg.ID)
 		}
 
-		fmt.Println("requesting reactions for", len(messageIds), "messages")
+		logger.Debugln("requesting reactions for messages", len(messageIds), "messages")
 		someReactions, err := b.GetReactions(chat.ID, chat.AccessHash, messageIds)
 		if err != nil {
 			return nil, errors.Wrap(err, "getting reactions")
