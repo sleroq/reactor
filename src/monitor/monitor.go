@@ -44,7 +44,7 @@ type Monitor struct {
 	logger  *zap.SugaredLogger
 }
 
-const MsgReqDelay = 5 * time.Second
+const MsgReqDelay = 30 * time.Second
 const RecoveringDelay = 5 * time.Minute
 
 func New(options Options, db *sql.DB, bot *bot.Bot, parentLogger *zap.SugaredLogger) *Monitor {

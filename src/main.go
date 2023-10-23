@@ -78,7 +78,7 @@ type Environment struct {
 	}
 
 	CheckFrequency struct {
-		Wide   int `env:"REACTOR_WIDE_FREQUENCY,default=60"`
+		Wide   int `env:"REACTOR_WIDE_FREQUENCY,default=180"`
 		Narrow int `env:"REACTOR_NARROW_FREQUENCY,default=10"`
 	}
 	CheckRange struct {
@@ -175,7 +175,7 @@ func run(ctx context.Context, options Options, logger *zap.SugaredLogger) (err e
 			// Setting up FLOOD_WAIT handler to automatically wait and retry request.
 			waiter,
 			// Setting up general rate limits to less likely get flood wait errors.
-			ratelimit.New(rate.Every(time.Millisecond*100), 5),
+			ratelimit.New(rate.Every(time.Millisecond*500), 5),
 		},
 	}
 	client := telegram.NewClient(options.Env.AppID, options.Env.AppHash, clientOptions)
