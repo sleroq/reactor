@@ -111,13 +111,13 @@
                 ProtectKernelTunables = true;
                 ProtectKernelModules = true;
                 ProtectControlGroups = true;
+              } // lib.optionalAttrs (cfg.environmentFile != null) {
+                EnvironmentFile = cfg.environmentFile;
               };
 
               environment = cfg.settings // {
                 REACTOR_SESSION_DIR = cfg.dataDir;
               };
-            } // lib.optionalAttrs (cfg.environmentFile != null) {
-              serviceConfig.EnvironmentFile = cfg.environmentFile;
             };
           };
         };
