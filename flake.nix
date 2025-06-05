@@ -8,7 +8,6 @@
 
   outputs = { self, nixpkgs, flake-utils }:
     let
-      # Define the package builder function
       buildReactor = pkgs: pkgs.buildGoModule rec {
         pname = "reactor";
         version = "0.1.0";
@@ -33,7 +32,6 @@
       };
     in
     {
-      # NixOS module at top level
       nixosModules.reactor = { config, lib, pkgs, ... }:
         with lib;
         let
@@ -122,7 +120,6 @@
           };
         };
 
-      # Default nixos module for easy import
       nixosModules.default = self.nixosModules.reactor;
     } // flake-utils.lib.eachDefaultSystem (system:
       let
