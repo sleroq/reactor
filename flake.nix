@@ -14,7 +14,7 @@
 
         src = ./.;
 
-        vendorHash = "sha256-oKoSCT2lpykWoU6dkD36XryieZb7VAdEs3S7ZrJqPbQ=";
+        vendorHash = "sha256-SYkPTq/9sA6voZ0iiD7dl14+fMT0VN4zHkpY66XrQuM=";
 
         subPackages = [ "src" ];
 
@@ -132,7 +132,7 @@
 
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
-            go_1_24
+            go_1_25
             gopls
             gotools
             go-tools

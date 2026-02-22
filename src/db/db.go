@@ -60,7 +60,7 @@ func SaveMessage(msg *tg.Message, chatID int64, db *sql.DB) (Message, error) {
 			replyID = v.ReplyToMsgID
 			break
 		case *tg.MessageReplyStoryHeader:
-			fmt.Println("fucking story?", v.GetStoryID(), v.UserID)
+			fmt.Println("fucking story?", v.GetStoryID(), v.GetPeer())
 			return Message{}, fmt.Errorf("unexpected reply type: %T", v)
 		default:
 			return Message{}, fmt.Errorf("unexpected reply type: %T", v)
