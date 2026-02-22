@@ -67,7 +67,6 @@ type Environment struct {
 	SessionDir      string `env:"REACTOR_SESSION_DIR,required=true"`
 
 	WatchedChatIDs          Int64Slice `env:"REACTOR_CHAT_IDS,required=true"`
-	CommandChatIDs          Int64Slice `env:"REACTOR_COMMAND_CHAT_IDS,required=true"`
 	DestChannelIDs          Int64Slice `env:"REACTOR_CHANNEL_ID,required=true"`
 	DestChannelAccessHashes Int64Slice `env:"REACTOR_CHANNEL_ACCESS_HASH,required=true"`
 
@@ -94,7 +93,6 @@ type Environment struct {
 type Options struct {
 	Env              Environment
 	ChatsToMonitor   []tg.InputPeerChannel
-	CommandChatIDs   []int64
 	NoQuoteWhitelist []int64
 	DestChannels     []tg.InputPeerClass
 }
@@ -459,10 +457,6 @@ func prepareOptions() (options Options, err error) {
 
 	for _, chatID := range environment.NoQuoteWhitelistIDs {
 		options.NoQuoteWhitelist = append(options.NoQuoteWhitelist, chatID)
-	}
-
-	for _, chatID := range environment.CommandChatIDs {
-		options.CommandChatIDs = append(options.CommandChatIDs, chatID)
 	}
 
 	if len(environment.DestChannelIDs) != len(environment.DestChannelAccessHashes) {

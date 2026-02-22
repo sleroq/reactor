@@ -100,7 +100,9 @@ func CommandMessageHandler(req CommandHandlerContext, options Options, logger *z
 		return nil
 	}
 
-	allowed := slices.Contains(options.CommandChatIDs, p.Channel.ID)
+	allowed := slices.ContainsFunc(options.ChatsToMonitor, func(ch tg.InputPeerChannel) bool {
+		return p.Channel.ID == ch.ChannelID
+	})
 	if !allowed {
 		return nil
 	}
