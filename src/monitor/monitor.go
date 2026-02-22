@@ -47,6 +47,8 @@ type Monitor struct {
 const MsgReqDelay = 30 * time.Second
 const RecoveringDelay = 5 * time.Minute
 
+var stopWordPattern = regexp.MustCompile(`(?i)(мяу)`)
+
 func New(options Options, db *sql.DB, bot *bot.Bot, parentLogger *zap.SugaredLogger) *Monitor {
 	logger := parentLogger.Named("monitor")
 	return &Monitor{
@@ -174,10 +176,14 @@ func (m Monitor) checkMessages(chat db.Chat, messages []db.Message) error {
 
 		if totalRating > threshold {
 			// Checking to see if message was edited
-			msg, err := m.UpdateMessage(tg.InputChannel{
+			msg, err = m.UpdateMessage(tg.InputChannel{
 				ChannelID:  chat.ID,
 				AccessHash: chat.AccessHash,
 			}, msg)
+			if err != nil {
+				return errors.Wrap(err, "updating message")
+			}
+
 			finalRating, err := m.rateMessage(reactions, msg)
 			if err != nil {
 				return errors.Wrap(err, "rating message")
@@ -205,6 +211,9 @@ func (m Monitor) checkMessages(chat db.Chat, messages []db.Message) error {
 			messages := []db.Message{msg}
 			if msg.GroupedID != 0 {
 				messages, err = db.GetMessagesGroup(m.db, msg.GroupedID)
+				if err != nil {
+					return errors.Wrap(err, "getting grouped messages")
+				}
 			}
 
 			for _, destination := range m.options.Chats.Destinations {
@@ -335,10 +344,8 @@ func (m Monitor) rateMessage(reactions []db.Reaction, msg db.Message) (int, erro
 	stopWordCount := 0
 	words := strings.Split(msg.Body, " ")
 	for _, word := range words {
-		if res, err := regexp.MatchString("(?i)(мяу)", word); res {
+		if stopWordPattern.MatchString(word) {
 			stopWordCount += 1
-		} else if err != nil {
-			return 0, errors.Wrap(err, "matching stopWord")
 		}
 	}
 	totalRating += stopWordCount * -10
@@ -357,7 +364,7 @@ func (m Monitor) ReplyMessageRating(
 	msg, err := db.GetMessage(m.db, chat.ID, replyID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			err = m.bot.Reply(e, u, fmt.Sprint("404"))
+			err = m.bot.Reply(e, u, "404")
 			if err != nil {
 				return errors.Wrap(err, "replying with 404")
 			}
@@ -369,6 +376,9 @@ func (m Monitor) ReplyMessageRating(
 		ChannelID:  chat.ID,
 		AccessHash: chat.AccessHash,
 	}, msg)
+	if err != nil {
+		return errors.Wrap(err, "updating message")
+	}
 
 	reactionsList, err := m.bot.GetReactionsList(msg, chat.AccessHash)
 	if err != nil {
@@ -420,7 +430,7 @@ func (m Monitor) checkForMissedMessages() error {
 				logger.Debugf("checking missing range: %v with offset: %d", missingRange, offset)
 
 				// Calculate the actual limit for this call based on remaining messages
-				callLimit := limit
+				var callLimit int
 				if remaining := start + limit - offset; remaining < 100 {
 					callLimit = remaining
 				} else {

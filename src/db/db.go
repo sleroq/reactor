@@ -58,7 +58,6 @@ func SaveMessage(msg *tg.Message, chatID int64, db *sql.DB) (Message, error) {
 		switch v := msg.ReplyTo.(type) {
 		case *tg.MessageReplyHeader: // messageReplyHeader#a6d57763
 			replyID = v.ReplyToMsgID
-			break
 		case *tg.MessageReplyStoryHeader:
 			fmt.Println("fucking story?", v.GetStoryID(), v.GetPeer())
 			return Message{}, fmt.Errorf("unexpected reply type: %T", v)
@@ -455,7 +454,7 @@ func SetupDB() (*sql.DB, error) {
 
 	`)
 	if err != nil {
-
+		return nil, errors.Wrap(err, "creating checked_messages table")
 	}
 	return db, nil
 }
@@ -516,6 +515,13 @@ func GetOnlySavedChats(sources []tg.InputPeerChannel, db *sql.DB) ([]Chat, error
 	`, strings.Join(IDs, ", "))
 
 	chatRows, err := db.Query(query)
+	if err != nil {
+		return nil, errors.Wrap(err, "querying chats")
+	}
+	defer func() {
+		_ = chatRows.Close()
+	}()
+
 	var chats []Chat
 	for chatRows.Next() {
 		var chat Chat
@@ -537,6 +543,10 @@ func GetOnlySavedChats(sources []tg.InputPeerChannel, db *sql.DB) ([]Chat, error
 		}
 
 		chats = append(chats, chat)
+	}
+
+	if err := chatRows.Err(); err != nil {
+		return nil, errors.Wrap(err, "iterating chats")
 	}
 
 	return chats, nil

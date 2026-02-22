@@ -89,6 +89,13 @@ var ratingTable = map[string]int{
 	"️🤷‍♀️": 1,
 }
 
+var positiveReplyPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)^сукаa+`),
+	regexp.MustCompile(`(?i)^я`),
+	regexp.MustCompile(`(?i)^\++$`),
+	regexp.MustCompile(`(?i)^(плюс)+`),
+}
+
 // ReactionPositivity returns rating on scale from -10 to 10
 // for any of Telegram reaction emojis
 func ReactionPositivity(emoticon string) (int, error) {
@@ -223,25 +230,11 @@ func PositiveReplies(messages []db.Message) (map[int64]string, error) {
 			}
 		}
 
-		if res, err := regexp.MatchString(`(?i)^сукаa+`, body); res {
-			positive = true
-		} else if err != nil {
-			return nil, errors.Wrap(err, "matching body")
-		}
-		if res, err := regexp.MatchString(`(?i)^я`, body); res {
-			positive = true
-		} else if err != nil {
-			return nil, errors.Wrap(err, "matching body")
-		}
-		if res, err := regexp.MatchString(`(?i)^\++$`, body); res {
-			positive = true
-		} else if err != nil {
-			return nil, errors.Wrap(err, "matching body")
-		}
-		if res, err := regexp.MatchString(`(?i)^(плюс)+`, body); res {
-			positive = true
-		} else if err != nil {
-			return nil, errors.Wrap(err, "matching body")
+		for _, p := range positiveReplyPatterns {
+			if p.MatchString(body) {
+				positive = true
+				break
+			}
 		}
 
 		if positive {

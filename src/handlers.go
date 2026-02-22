@@ -49,10 +49,7 @@ func ChannelMessageHandler(req HandlerContext, options Options, logger *zap.Suga
 	//fmt.Println(helpers.FormatObject(msg))
 
 	allowed := slices.ContainsFunc(options.ChatsToMonitor, func(ch tg.InputPeerChannel) bool {
-		if p.Channel.ID == ch.ChannelID {
-			return true
-		}
-		return false
+		return p.Channel.ID == ch.ChannelID
 	})
 	if !allowed {
 		return nil
@@ -88,7 +85,6 @@ func ratingCmd(req HandlerContext, msg *tg.Message, p storage.Peer, logger *zap.
 	switch v := msg.ReplyTo.(type) {
 	case *tg.MessageReplyHeader: // messageReplyHeader#a6d57763
 		reply = v
-		break
 	case *tg.MessageReplyStoryHeader:
 		logger.Debug("story reply, ignoring %s", helpers.FormatObject(msg))
 		return fmt.Errorf("unexpected reply type: %T", reply)
