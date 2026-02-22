@@ -11,8 +11,8 @@ Reactor is a user-bot that helps you discover the most popular memes and posts f
 - Customize the threshold for forwarding messages
 - Use emoji reactions or reply counts as criteria
 
-
 ## Installation
+
 To install Reactor, you need to have [Go](https://golang.org/) installed on your system. Then, follow these steps:
 
 1. Clone this repository: `git clone https://github.com/sleroq/reactor.git`
@@ -23,12 +23,15 @@ To install Reactor, you need to have [Go](https://golang.org/) installed on your
 ## Configuration
 
 Before running the bot, you need to create a configuration file named `scripts/env.bash` in `scripts` folder as the executable. The configuration file should have the following variables:
+
 ```bash
 export REACTOR_PHONE=""
 export REACTOR_APP_ID=""
 export REACTOR_APP_HASH=""
+export REACTOR_COMMAND_BOT_TOKEN=""
 export REACTOR_SESSION_DIR=./session
 export REACTOR_CHAT_IDS="123123,23123"
+export REACTOR_COMMAND_CHAT_IDS="123123,23123"
 export REACTOR_CHANNEL_ID=""
 export REACTOR_CHANNEL_ACCESS_HASH=""
 ```

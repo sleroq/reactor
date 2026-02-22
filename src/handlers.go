@@ -4,16 +4,19 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strconv"
+	"strings"
+
 	"github.com/go-faster/errors"
 	"github.com/gotd/contrib/pebble"
 	"github.com/gotd/contrib/storage"
 	"github.com/gotd/td/tg"
+	botWrapper "github.com/sleroq/reactor/src/bot"
 	"github.com/sleroq/reactor/src/db"
 	"github.com/sleroq/reactor/src/helpers"
 	"github.com/sleroq/reactor/src/monitor"
 	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
-	"strings"
 )
 
 type HandlerContext struct {
@@ -66,17 +69,46 @@ func ChannelMessageHandler(req HandlerContext, options Options, logger *zap.Suga
 		return errors.Wrap(err, "saving message")
 	}
 
-	if strings.HasPrefix(msg.Message, "/r") {
-		err := ratingCmd(req, msg, p, logger)
-		if err != nil {
-			return errors.Wrap(err, "handling rating command")
-		}
-	}
-
 	return nil
 }
 
-func ratingCmd(req HandlerContext, msg *tg.Message, p storage.Peer, logger *zap.SugaredLogger) (err error) {
+type CommandHandlerContext struct {
+	ctx     context.Context
+	e       tg.Entities
+	u       tg.MessageClass
+	peerDB  *pebble.PeerStorage
+	watcher *monitor.Monitor
+	bot     *botWrapper.Bot
+}
+
+func CommandMessageHandler(req CommandHandlerContext, options Options, logger *zap.SugaredLogger) (err error) {
+	msg, ok := req.u.(*tg.Message)
+	if !ok {
+		return nil
+	}
+
+	if !isRatingCommand(msg.Message) {
+		return nil
+	}
+
+	p, err := storage.FindPeer(req.ctx, req.peerDB, msg.GetPeerID())
+	if err != nil {
+		return errors.Wrap(err, "finding peer")
+	}
+
+	if p.Channel == nil {
+		return nil
+	}
+
+	allowed := slices.Contains(options.CommandChatIDs, p.Channel.ID)
+	if !allowed {
+		return nil
+	}
+
+	return ratingCmd(req, msg, p.Channel, logger)
+}
+
+func ratingCmd(req CommandHandlerContext, msg *tg.Message, channel *tg.Channel, logger *zap.SugaredLogger) (err error) {
 	if msg.ReplyTo == nil {
 		return nil
 	}
@@ -93,10 +125,37 @@ func ratingCmd(req HandlerContext, msg *tg.Message, p storage.Peer, logger *zap.
 	}
 
 	if reply.ReplyToMsgID != 0 {
-		err = req.watcher.ReplyMessageRating(req.e, req.u, reply.ReplyToMsgID, p.Channel)
+		rating, err := req.watcher.MessageRating(channel, reply.ReplyToMsgID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return req.bot.ReplyToPeer(&tg.InputPeerChannel{
+					ChannelID:  channel.ID,
+					AccessHash: channel.AccessHash,
+				}, msg.ID, "404")
+			}
+			return errors.Wrap(err, "getting message rating")
+		}
+
+		err = req.bot.ReplyToPeer(&tg.InputPeerChannel{
+			ChannelID:  channel.ID,
+			AccessHash: channel.AccessHash,
+		}, msg.ID, strconv.Itoa(rating))
 		if err != nil {
 			return errors.Wrap(err, "replying with message rating")
 		}
 	}
+
 	return err
+}
+
+func isRatingCommand(text string) bool {
+	parts := strings.Fields(text)
+	if len(parts) == 0 {
+		return false
+	}
+
+	command := strings.ToLower(parts[0])
+	command = strings.SplitN(command, "@", 2)[0]
+
+	return command == "/r"
 }

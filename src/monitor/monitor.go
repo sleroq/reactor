@@ -353,23 +353,12 @@ func (m Monitor) rateMessage(reactions []db.Reaction, msg db.Message) (int, erro
 	return totalRating, nil
 }
 
-func (m Monitor) ReplyMessageRating(
-	e tg.Entities,
-	u *tg.UpdateNewChannelMessage,
-	replyID int,
-	chat *tg.Channel,
-) error {
-	m.logger.Infof("replying with rating for message %d", replyID)
+func (m Monitor) MessageRating(chat *tg.Channel, messageID int) (int, error) {
+	m.logger.Infof("calculating rating for message %d", messageID)
 
-	msg, err := db.GetMessage(m.db, chat.ID, replyID)
+	msg, err := db.GetMessage(m.db, chat.ID, messageID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			err = m.bot.Reply(e, u, "404")
-			if err != nil {
-				return errors.Wrap(err, "replying with 404")
-			}
-		}
-		return errors.Wrap(err, "getting saved message")
+		return 0, err
 	}
 
 	msg, err = m.UpdateMessage(tg.InputChannel{
@@ -377,29 +366,24 @@ func (m Monitor) ReplyMessageRating(
 		AccessHash: chat.AccessHash,
 	}, msg)
 	if err != nil {
-		return errors.Wrap(err, "updating message")
+		return 0, errors.Wrap(err, "updating message")
 	}
 
 	reactionsList, err := m.bot.GetReactionsList(msg, chat.AccessHash)
 	if err != nil {
-		return errors.Wrap(err, "getting reactions list for a message")
+		return 0, errors.Wrap(err, "getting reactions list for a message")
 	}
 	reactions, err := helpers.AsReactions(reactionsList.Reactions, msg.ChatID, msg.ID)
 	if err != nil {
-		return errors.Wrap(err, "converting reaction")
+		return 0, errors.Wrap(err, "converting reaction")
 	}
 
 	totalRating, err := m.rateMessage(reactions, msg)
 	if err != nil {
-		return errors.Wrap(err, "rating message")
+		return 0, errors.Wrap(err, "rating message")
 	}
 
-	err = m.bot.Reply(e, u, fmt.Sprint(totalRating))
-	if err != nil {
-		return errors.Wrap(err, "replying with rating")
-	}
-
-	return nil
+	return totalRating, nil
 }
 
 func (m Monitor) checkForMissedMessages() error {

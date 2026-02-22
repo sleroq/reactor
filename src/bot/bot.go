@@ -171,6 +171,17 @@ func (b Bot) Reply(e tg.Entities, u *tg.UpdateNewChannelMessage, text string) er
 	return nil
 }
 
+func (b Bot) ReplyToPeer(peer tg.InputPeerClass, replyID int, text string) error {
+	sender := message.NewSender(b.api)
+	builder := sender.To(peer).CloneBuilder().Reply(replyID)
+	_, err := builder.Text(b.ctx, text)
+	if err != nil {
+		return errors.Wrap(err, "sending reply")
+	}
+
+	return nil
+}
+
 func (b Bot) GetMessageText(chat tg.InputChannel, msgID int) (string, error) {
 	// TODO: Maybe rewrite this part and make requests for multiple messages at once
 	messages, err := b.api.ChannelsGetMessages(
