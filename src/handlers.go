@@ -119,33 +119,33 @@ func ratingCmd(req CommandHandlerContext, msg *tg.Message, channel *tg.Channel, 
 		reply = v
 	case *tg.MessageReplyStoryHeader:
 		logger.Debug("story reply, ignoring %s", helpers.FormatObject(msg))
-		return fmt.Errorf("unexpected reply type: %T", reply)
+		return fmt.Errorf("unexpected reply type: %T", v)
 	default:
-		return fmt.Errorf("unexpected reply type: %T", reply)
+		return fmt.Errorf("unexpected reply type: %T", v)
 	}
 
 	if reply.ReplyToMsgID != 0 {
-		rating, err := req.watcher.MessageRating(channel, reply.ReplyToMsgID)
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
+		rating, ratingErr := req.watcher.MessageRating(channel, reply.ReplyToMsgID)
+		if ratingErr != nil {
+			if errors.Is(ratingErr, sql.ErrNoRows) {
 				return req.bot.ReplyToPeer(&tg.InputPeerChannel{
 					ChannelID:  channel.ID,
 					AccessHash: channel.AccessHash,
 				}, msg.ID, "404")
 			}
-			return errors.Wrap(err, "getting message rating")
+			return errors.Wrap(ratingErr, "getting message rating")
 		}
 
-		err = req.bot.ReplyToPeer(&tg.InputPeerChannel{
+		replyErr := req.bot.ReplyToPeer(&tg.InputPeerChannel{
 			ChannelID:  channel.ID,
 			AccessHash: channel.AccessHash,
 		}, msg.ID, strconv.Itoa(rating))
-		if err != nil {
-			return errors.Wrap(err, "replying with message rating")
+		if replyErr != nil {
+			return errors.Wrap(replyErr, "replying with message rating")
 		}
 	}
 
-	return err
+	return nil
 }
 
 func isRatingCommand(text string) bool {
