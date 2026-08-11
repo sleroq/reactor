@@ -10,8 +10,6 @@ import (
 	"github.com/go-faster/errors"
 	"github.com/gotd/td/tg"
 	"github.com/sleroq/reactor/src/bot"
-	"golang.org/x/exp/slices"
-
 	"regexp"
 	"strings"
 	"time"
@@ -198,14 +196,11 @@ func (m Monitor) checkMessages(chat db.Chat, messages []db.Message) error {
 			)
 
 			noQuote := true
-			if slices.Contains(m.options.NoQuoteWhitelist, msg.FwdFromChannel) {
-				noQuote = false
-			}
-			if slices.Contains(m.options.NoQuoteWhitelist, msg.FwdFromUser) {
-				noQuote = false
-			}
-			if slices.Contains(m.options.NoQuoteWhitelist, msg.UserID) {
-				noQuote = false
+			for _, id := range m.options.NoQuoteWhitelist {
+				if id == msg.FwdFromChannel || id == msg.FwdFromUser || id == msg.UserID {
+					noQuote = false
+					break
+				}
 			}
 
 			messages := []db.Message{msg}
@@ -342,8 +337,7 @@ func (m Monitor) rateMessage(reactions []db.Reaction, msg db.Message) (int, erro
 	}
 
 	stopWordCount := 0
-	words := strings.Split(msg.Body, " ")
-	for _, word := range words {
+	for word := range strings.SplitSeq(msg.Body, " ") {
 		if stopWordPattern.MatchString(word) {
 			stopWordCount += 1
 		}

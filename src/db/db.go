@@ -13,7 +13,6 @@ import (
 	"github.com/gotd/td/bin"
 	"github.com/gotd/td/tg"
 	_ "github.com/mattn/go-sqlite3"
-	"golang.org/x/exp/slices"
 )
 
 func SaveMessage(msg *tg.Message, chatID int64, db *sql.DB) (Message, error) {
@@ -461,14 +460,15 @@ func SetupDB() (*sql.DB, error) {
 
 func SyncPeerReactions(botdb *sql.DB, old, new []Reaction) (err error) {
 	for _, react := range new {
-		hasNewReaction := slices.ContainsFunc(old, func(el Reaction) bool {
+		hasNewReaction := false
+		for _, el := range old {
 			if el.SentDate.Equal(react.SentDate) &&
 				el.UserID == react.UserID &&
 				el.ChatID == react.ChatID {
-				return true
+				hasNewReaction = true
+				break
 			}
-			return false
-		})
+		}
 
 		if !hasNewReaction {
 			err = SaveReaction(botdb, react)
@@ -479,14 +479,15 @@ func SyncPeerReactions(botdb *sql.DB, old, new []Reaction) (err error) {
 	}
 
 	for _, oldReact := range old {
-		hasOldReaction := slices.ContainsFunc(new, func(el Reaction) bool {
+		hasOldReaction := false
+		for _, el := range new {
 			if el.SentDate.Equal(oldReact.SentDate) &&
 				el.UserID == oldReact.UserID &&
 				el.ChatID == oldReact.ChatID {
-				return true
+				hasOldReaction = true
+				break
 			}
-			return false
-		})
+		}
 		if !hasOldReaction {
 			err = DeleteReaction(botdb, oldReact)
 			if err != nil {

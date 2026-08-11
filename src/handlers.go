@@ -16,7 +16,6 @@ import (
 	"github.com/sleroq/reactor/src/helpers"
 	"github.com/sleroq/reactor/src/monitor"
 	"go.uber.org/zap"
-	"golang.org/x/exp/slices"
 )
 
 type HandlerContext struct {
@@ -51,10 +50,7 @@ func ChannelMessageHandler(req HandlerContext, options Options, logger *zap.Suga
 	//fmt.Println(msg.Message, p.Channel.ID, p.Channel.AccessHash)
 	//fmt.Println(helpers.FormatObject(msg))
 
-	allowed := slices.ContainsFunc(options.ChatsToMonitor, func(ch tg.InputPeerChannel) bool {
-		return p.Channel.ID == ch.ChannelID
-	})
-	if !allowed {
+	if !monitorsChannel(options.ChatsToMonitor, p.Channel.ID) {
 		return nil
 	}
 
@@ -100,14 +96,21 @@ func CommandMessageHandler(req CommandHandlerContext, options Options, logger *z
 		return nil
 	}
 
-	allowed := slices.ContainsFunc(options.ChatsToMonitor, func(ch tg.InputPeerChannel) bool {
-		return p.Channel.ID == ch.ChannelID
-	})
-	if !allowed {
+	if !monitorsChannel(options.ChatsToMonitor, p.Channel.ID) {
 		return nil
 	}
 
 	return ratingCmd(req, msg, p.Channel, logger)
+}
+
+func monitorsChannel(chats []tg.InputPeerChannel, channelID int64) bool {
+	for _, chat := range chats {
+		if chat.ChannelID == channelID {
+			return true
+		}
+	}
+
+	return false
 }
 
 func ratingCmd(req CommandHandlerContext, msg *tg.Message, channel *tg.Channel, logger *zap.SugaredLogger) (err error) {

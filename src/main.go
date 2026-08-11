@@ -47,8 +47,7 @@ func sessionFolder(phone string) string {
 type Int64Slice []int64
 
 func (i *Int64Slice) UnmarshalEnvironmentValue(value string) error {
-	parts := strings.Split(value, ",")
-	for _, part := range parts {
+	for part := range strings.SplitSeq(value, ",") {
 		number, err := strconv.ParseInt(strings.TrimSpace(part), 10, 64)
 		if err != nil {
 			return err
@@ -278,7 +277,7 @@ func run(ctx context.Context, options Options, logger *zap.SugaredLogger) (err e
 	}()
 
 	var firstErr error
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		runErr := <-errChan
 		if runErr != nil && firstErr == nil {
 			firstErr = runErr

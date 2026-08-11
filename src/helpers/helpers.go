@@ -173,34 +173,36 @@ var GOOD_PARTS = []string{
 // matchMultiple function allows to match multiple letters/words in string
 // using regexp (without iteration over string)
 func matchMultiple(s string, items []string, words bool) (bool, error) {
-	pattern := `(?i)(`
-	excludePatten := `(?i)(`
+	var pattern strings.Builder
+	var excludePattern strings.Builder
+	pattern.WriteString(`(?i)(`)
+	excludePattern.WriteString(`(?i)(`)
 
 	for i, word := range items {
 		if words {
-			pattern += fmt.Sprintf(`((^|\W)%s($|\W))`, word)
-			excludePatten += fmt.Sprintf(`((^|\W)(not\s|not|no\s|no|не\s|не)%s($|\W))`, word)
+			fmt.Fprintf(&pattern, `((^|\W)%s($|\W))`, word)
+			fmt.Fprintf(&excludePattern, `((^|\W)(not\s|not|no\s|no|не\s|не)%s($|\W))`, word)
 		} else {
-			pattern += fmt.Sprintf(`(%s)`, word)
-			excludePatten += fmt.Sprintf(`((not\s|not|no\s|no|не\s|не)\w+%s)`, word)
+			fmt.Fprintf(&pattern, `(%s)`, word)
+			fmt.Fprintf(&excludePattern, `((not\s|not|no\s|no|не\s|не)\w+%s)`, word)
 		}
 
 		if i+1 != len(items) {
-			pattern += "|"
-			excludePatten += "|"
+			pattern.WriteString("|")
+			excludePattern.WriteString("|")
 		} else {
-			pattern += ")"
-			excludePatten += ")"
+			pattern.WriteString(")")
+			excludePattern.WriteString(")")
 		}
 	}
 
 	result := false
-	if res, err := regexp.MatchString(pattern, s); res {
+	if res, err := regexp.MatchString(pattern.String(), s); res {
 		result = true
 	} else if err != nil {
 		return false, errors.Wrap(err, "matching body")
 	}
-	if res, err := regexp.MatchString(excludePatten, s); res {
+	if res, err := regexp.MatchString(excludePattern.String(), s); res {
 		result = false
 	} else if err != nil {
 		return false, errors.Wrap(err, "matching body")
@@ -286,7 +288,7 @@ func AsReactions(tgReactions []tg.MessagePeerReaction, chatID int64, messageID i
 	return reactions, nil
 }
 
-func FormatObject(input interface{}) string {
+func FormatObject(input any) string {
 	o, ok := input.(tdp.Object)
 	if !ok {
 		// Handle tg.*Box values.
