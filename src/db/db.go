@@ -287,7 +287,7 @@ func GetMessagesGroup(db *sql.DB, groupedID int64) ([]Message, error) {
 
 func GetSavedReactions(db *sql.DB, chatID int64, messageID int) ([]Reaction, error) {
 	rows, err := db.Query(`
-		select 
+		select
 		    chatId,
 			messageId,
 			userId,
@@ -557,19 +557,19 @@ func GetMissedMessagesRanges(chatID int64, db *sql.DB) ([][2]int, error) {
 	// Run query to get all IDs
 	rows, err := db.Query(`
 		-- Select all ids from messages
-		SELECT id 
+		SELECT id
 		FROM messages
 		where chatId = :chatID
 
 		-- Union all ids from checked_messages that are not found in messages
-		UNION ALL 
+		UNION ALL
 
 		SELECT messageId as id
 		FROM checked_messages
 		where chatId = :chatID;
 	`, chatID)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	// Retrieve all IDs and store them in the slice
