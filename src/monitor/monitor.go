@@ -347,13 +347,21 @@ func (m Monitor) rateMessage(reactions []db.Reaction, msg db.Message) (int, erro
 	return totalRating, nil
 }
 
-func (m Monitor) MessageRating(chat *tg.Channel, messageID int) (int, error) {
+func (m Monitor) MessageRating(chatID int64, messageID int) (int, error) {
 	m.logger.Infof("calculating rating for message %d", messageID)
 
-	msg, err := db.GetMessage(m.db, chat.ID, messageID)
+	msg, err := db.GetMessage(m.db, chatID, messageID)
 	if err != nil {
 		return 0, err
 	}
+	chats, err := db.GetOnlySavedChats([]tg.InputPeerChannel{{ChannelID: chatID}}, m.db)
+	if err != nil {
+		return 0, errors.Wrap(err, "getting saved chat")
+	}
+	if len(chats) == 0 {
+		return 0, sql.ErrNoRows
+	}
+	chat := chats[0]
 
 	msg, err = m.UpdateMessage(tg.InputChannel{
 		ChannelID:  chat.ID,

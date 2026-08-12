@@ -131,7 +131,7 @@ func ratingCmd(req CommandHandlerContext, msg *tg.Message, channel *tg.Channel, 
 	}
 
 	if reply.ReplyToMsgID != 0 {
-		rating, ratingErr := req.watcher.MessageRating(channel, reply.ReplyToMsgID)
+		rating, ratingErr := req.watcher.MessageRating(channel.ID, reply.ReplyToMsgID)
 		if ratingErr != nil {
 			if errors.Is(ratingErr, sql.ErrNoRows) {
 				return req.bot.ReplyToPeer(&tg.InputPeerChannel{

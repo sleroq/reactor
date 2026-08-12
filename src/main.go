@@ -262,7 +262,6 @@ func run(ctx context.Context, options Options, logger *zap.SugaredLogger) (err e
 	}
 
 	commandBot := botWrapper.New(ctx, commandRuntime.api)
-	registerCommandHandlers(commandDispatcher, commandRuntime.peerDB, watcher, commandBot, options, logger)
 
 	errChan := make(chan error, 2)
 	runCtx, cancel := context.WithCancel(ctx)
@@ -273,7 +272,7 @@ func run(ctx context.Context, options Options, logger *zap.SugaredLogger) (err e
 	}()
 
 	go func() {
-		errChan <- runCommandClient(runCtx, commandRuntime, options, commandInternalLogger, logger)
+		errChan <- runCommandClient(runCtx, commandRuntime, commandDispatcher, watcher, commandBot, options, commandInternalLogger, logger)
 	}()
 
 	var firstErr error
@@ -348,6 +347,9 @@ func runMonitoringClient(
 func runCommandClient(
 	ctx context.Context,
 	runtime *TelegramRuntime,
+	dispatcher tg.UpdateDispatcher,
+	watcher *monitor.Monitor,
+	commandBot *botWrapper.Bot,
 	options Options,
 	lg *zap.Logger,
 	logger *zap.SugaredLogger,
