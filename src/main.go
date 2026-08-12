@@ -377,6 +377,7 @@ func runCommandClient(
 				zap.Int64("id", self.ID),
 			)
 			logger.Infow("Command bot connected", "username", self.Username, "id", self.ID)
+			registerCommandHandlers(dispatcher, runtime.peerDB, watcher, commandBot, self.Username, options, logger)
 
 			return runtime.updatesRecovery.Run(ctx, runtime.api, self.ID, updates.AuthOptions{
 				IsBot: true,
@@ -397,17 +398,19 @@ func registerCommandHandlers(
 	peerDB *pebble.PeerStorage,
 	watcher *monitor.Monitor,
 	commandBot *botWrapper.Bot,
+	username string,
 	options Options,
 	logger *zap.SugaredLogger,
 ) {
 	handler := func(ctx context.Context, e tg.Entities, msg tg.MessageClass) error {
 		handlerCtx := CommandHandlerContext{
-			ctx:     ctx,
-			e:       e,
-			u:       msg,
-			peerDB:  peerDB,
-			watcher: watcher,
-			bot:     commandBot,
+			ctx:      ctx,
+			e:        e,
+			u:        msg,
+			peerDB:   peerDB,
+			watcher:  watcher,
+			bot:      commandBot,
+			username: username,
 		}
 
 		err := CommandMessageHandler(handlerCtx, options, logger.Named("command_message_handler"))

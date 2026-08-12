@@ -69,12 +69,13 @@ func ChannelMessageHandler(req HandlerContext, options Options, logger *zap.Suga
 }
 
 type CommandHandlerContext struct {
-	ctx     context.Context
-	e       tg.Entities
-	u       tg.MessageClass
-	peerDB  *pebble.PeerStorage
-	watcher *monitor.Monitor
-	bot     *botWrapper.Bot
+	ctx      context.Context
+	e        tg.Entities
+	u        tg.MessageClass
+	peerDB   *pebble.PeerStorage
+	watcher  *monitor.Monitor
+	bot      *botWrapper.Bot
+	username string
 }
 
 func CommandMessageHandler(req CommandHandlerContext, options Options, logger *zap.SugaredLogger) (err error) {
@@ -83,7 +84,7 @@ func CommandMessageHandler(req CommandHandlerContext, options Options, logger *z
 		return nil
 	}
 
-	if !isRatingCommand(msg.Message) {
+	if !isRatingCommand(msg.Message, req.username) {
 		return nil
 	}
 
@@ -153,14 +154,16 @@ func ratingCmd(req CommandHandlerContext, msg *tg.Message, channel *tg.Channel, 
 	return nil
 }
 
-func isRatingCommand(text string) bool {
+func isRatingCommand(text, username string) bool {
 	parts := strings.Fields(text)
 	if len(parts) == 0 {
 		return false
 	}
 
 	command := strings.ToLower(parts[0])
-	command = strings.SplitN(command, "@", 2)[0]
+	if command == "/r" {
+		return true
+	}
 
-	return command == "/r"
+	return username != "" && command == "/r@"+strings.ToLower(username)
 }
