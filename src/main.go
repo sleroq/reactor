@@ -72,9 +72,12 @@ type Environment struct {
 	NoQuoteWhitelistIDs Int64Slice `env:"REACTOR_NOQUOTE_WHITELIST"`
 
 	Thresholds struct {
-		Text    int `env:"REACTOR_TEXT_THRESHOLD,default=31"`
-		Photo   int `env:"REACTOR_PHOTO_THRESHOLD,default=23"`
-		Forward int `env:"REACTOR_FORWARD_THRESHOLD,default=23"`
+		Text       int `env:"REACTOR_TEXT_THRESHOLD,default=31"`
+		Photo      int `env:"REACTOR_PHOTO_THRESHOLD,default=23"`
+		Forward    int `env:"REACTOR_FORWARD_THRESHOLD,default=23"`
+		TextMax    int `env:"REACTOR_TEXT_MAX_THRESHOLD,default=62"`
+		PhotoMax   int `env:"REACTOR_PHOTO_MAX_THRESHOLD,default=46"`
+		ForwardMax int `env:"REACTOR_FORWARD_MAX_THRESHOLD,default=46"`
 	}
 
 	CheckFrequency struct {
@@ -371,6 +374,19 @@ func runCommandClient(
 			if err != nil {
 				return errors.Wrap(err, "getting command bot self")
 			}
+			tokenBotID, err := commandBotID(options.Env.CommandBotToken)
+			if err != nil {
+				return errors.Wrap(err, "parsing command bot token")
+			}
+			if self.ID != tokenBotID {
+				return fmt.Errorf(
+					"command bot session belongs to @%s (%d), but configured token belongs to bot %d; remove %s and restart",
+					self.Username,
+					self.ID,
+					tokenBotID,
+					filepath.Join(options.Env.SessionDir, "command-bot"),
+				)
+			}
 
 			lg.Info("Login",
 				zap.String("first_name", self.FirstName),
@@ -430,6 +446,19 @@ func registerCommandHandlers(
 	dispatcher.OnNewChannelMessage(func(ctx context.Context, e tg.Entities, u *tg.UpdateNewChannelMessage) error {
 		return handler(ctx, e, u.Message)
 	})
+}
+
+func commandBotID(token string) (int64, error) {
+	id, _, ok := strings.Cut(token, ":")
+	if !ok {
+		return 0, errors.New("token has no separator")
+	}
+
+	botID, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		return 0, errors.Wrap(err, "parsing bot ID")
+	}
+	return botID, nil
 }
 
 func startMonitoring(ctx context.Context, watcher *monitor.Monitor, options Options) {

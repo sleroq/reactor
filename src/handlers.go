@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/go-faster/errors"
@@ -84,9 +83,11 @@ func CommandMessageHandler(req CommandHandlerContext, options Options, logger *z
 		return nil
 	}
 
-	if !isRatingCommand(msg.Message, req.username) {
+	command := commandName(msg.Message, req.username)
+	if command == "" {
 		return nil
 	}
+	logger.Infow("Handling command", "command", command, "text", msg.Message, "peer", fmt.Sprintf("%T", msg.GetPeerID()))
 
 	p, err := storage.FindPeer(req.ctx, req.peerDB, msg.GetPeerID())
 	if err != nil {
@@ -101,7 +102,17 @@ func CommandMessageHandler(req CommandHandlerContext, options Options, logger *z
 		return nil
 	}
 
-	return ratingCmd(req, msg, p.Channel, logger)
+	switch command {
+	case "r":
+		return ratingCmd(req, msg, p.Channel, logger)
+	case "help":
+		return req.bot.ReplyHelp(&tg.InputPeerChannel{
+			ChannelID:  p.Channel.ID,
+			AccessHash: p.Channel.AccessHash,
+		}, msg.ID)
+	}
+
+	return nil
 }
 
 func monitorsChannel(chats []tg.InputPeerChannel, channelID int64) bool {
@@ -131,7 +142,7 @@ func ratingCmd(req CommandHandlerContext, msg *tg.Message, channel *tg.Channel, 
 	}
 
 	if reply.ReplyToMsgID != 0 {
-		rating, ratingErr := req.watcher.MessageRating(channel.ID, reply.ReplyToMsgID)
+		rating, threshold, ratingErr := req.watcher.MessageRating(channel.ID, reply.ReplyToMsgID)
 		if ratingErr != nil {
 			if errors.Is(ratingErr, sql.ErrNoRows) {
 				return req.bot.ReplyToPeer(&tg.InputPeerChannel{
@@ -142,10 +153,10 @@ func ratingCmd(req CommandHandlerContext, msg *tg.Message, channel *tg.Channel, 
 			return errors.Wrap(ratingErr, "getting message rating")
 		}
 
-		replyErr := req.bot.ReplyToPeer(&tg.InputPeerChannel{
+		replyErr := req.bot.ReplyRating(&tg.InputPeerChannel{
 			ChannelID:  channel.ID,
 			AccessHash: channel.AccessHash,
-		}, msg.ID, strconv.Itoa(rating))
+		}, msg.ID, rating, threshold)
 		if replyErr != nil {
 			return errors.Wrap(replyErr, "replying with message rating")
 		}
@@ -154,16 +165,18 @@ func ratingCmd(req CommandHandlerContext, msg *tg.Message, channel *tg.Channel, 
 	return nil
 }
 
-func isRatingCommand(text, username string) bool {
+func commandName(text, username string) string {
 	parts := strings.Fields(text)
 	if len(parts) == 0 {
-		return false
+		return ""
 	}
 
 	command := strings.ToLower(parts[0])
-	if command == "/r" {
-		return true
+	for _, name := range []string{"r", "help"} {
+		if command == "/"+name || username != "" && command == "/"+name+"@"+strings.ToLower(username) {
+			return name
+		}
 	}
 
-	return username != "" && command == "/r@"+strings.ToLower(username)
+	return ""
 }

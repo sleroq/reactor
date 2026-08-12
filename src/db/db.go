@@ -196,6 +196,8 @@ func DeleteReaction(db *sql.DB, react Reaction) error {
 }
 
 func ScanMessageRows(rows *sql.Rows) ([]Message, error) {
+	defer func() { _ = rows.Close() }()
+
 	var messages []Message
 	for rows.Next() {
 		var message Message
@@ -218,6 +220,9 @@ func ScanMessageRows(rows *sql.Rows) ([]Message, error) {
 		}
 
 		messages = append(messages, message)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, errors.Wrap(err, "iterating message rows")
 	}
 
 	return messages, nil
@@ -271,6 +276,80 @@ func GetMessagesAfter(db *sql.DB, chatID int64, date time.Time) ([]Message, erro
 	}
 
 	return ScanMessageRows(msgRows)
+}
+
+func GetMessagesBetween(db *sql.DB, chatID int64, start, end time.Time) ([]Message, error) {
+	msgRows, err := db.Query(`
+		select * from messages
+		where sentDate >= :startDate
+			and sentDate <= :endDate
+			and chatId = :chatID
+	`, start, end, chatID)
+	if err != nil {
+		return nil, errors.Wrap(err, "getting messages in date range")
+	}
+
+	return ScanMessageRows(msgRows)
+}
+
+func GetReactionsForMessagesBetween(db *sql.DB, chatID int64, start, end time.Time) ([]Reaction, error) {
+	rows, err := db.Query(`
+		select
+			r.chatId,
+			r.messageId,
+			r.userId,
+			r.emoticon,
+			r.documentId,
+			r.sentDate,
+			r.flags,
+			r.big
+		from reactions r
+		join messages m on m.id = r.messageId and m.chatId = r.chatId
+		where m.chatId = :chatID
+			and m.sentDate >= :startDate
+			and m.sentDate <= :endDate
+	`, chatID, start, end)
+	if err != nil {
+		return nil, errors.Wrap(err, "querying reactions in message date range")
+	}
+	defer func() { _ = rows.Close() }()
+
+	var reactions []Reaction
+	for rows.Next() {
+		var reaction Reaction
+		if err := rows.Scan(
+			&reaction.ChatID,
+			&reaction.MessageID,
+			&reaction.UserID,
+			&reaction.Emoticon,
+			&reaction.DocumentID,
+			&reaction.SentDate,
+			&reaction.Flags,
+			&reaction.Big,
+		); err != nil {
+			return nil, errors.Wrap(err, "scanning reaction in message date range")
+		}
+		reactions = append(reactions, reaction)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, errors.Wrap(err, "iterating reactions in message date range")
+	}
+	return reactions, nil
+}
+
+func GetRepliesForMessagesBetween(db *sql.DB, chatID int64, start, end time.Time) ([]Message, error) {
+	rows, err := db.Query(`
+		select reply.*
+		from messages reply
+		join messages parent on parent.id = reply.replyTo and parent.chatId = reply.chatId
+		where parent.chatId = :chatID
+			and parent.sentDate >= :startDate
+			and parent.sentDate <= :endDate
+	`, chatID, start, end)
+	if err != nil {
+		return nil, errors.Wrap(err, "getting replies in parent message date range")
+	}
+	return ScanMessageRows(rows)
 }
 
 func GetMessagesGroup(db *sql.DB, groupedID int64) ([]Message, error) {
