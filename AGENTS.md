@@ -12,5 +12,5 @@ golangci-lint run --enable=modernize
 
 - Follow nearby code and standard Go conventions.
 - Wrap errors with `github.com/go-faster/errors`.
-- The app uses phone authentication (not the Bot API).
+- The monitoring client uses phone authentication; the command client uses a Bot API token.
 - Keep this file limited to non-obvious, durable project constraints.
