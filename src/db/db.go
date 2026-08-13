@@ -653,8 +653,9 @@ func GetMissedMessagesRanges(chatID int64, db *sql.DB) ([][2]int, error) {
 		where chatId = :chatID;
 	`, chatID)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "querying message IDs")
 	}
+	defer func() { _ = rows.Close() }()
 
 	// Retrieve all IDs and store them in the slice
 	var ids []int
@@ -662,9 +663,12 @@ func GetMissedMessagesRanges(chatID int64, db *sql.DB) ([][2]int, error) {
 		var id int
 		err := rows.Scan(&id)
 		if err != nil {
-			panic(err)
+			return nil, errors.Wrap(err, "scanning message ID")
 		}
 		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, errors.Wrap(err, "iterating message IDs")
 	}
 
 	sort.Ints(ids)
