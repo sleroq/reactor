@@ -18,6 +18,7 @@ import (
 	"github.com/gotd/contrib/middleware/ratelimit"
 	"github.com/gotd/contrib/pebble"
 	"github.com/gotd/contrib/storage"
+	"github.com/gotd/log/logzap"
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/telegram/auth"
 	"github.com/gotd/td/telegram/message/peer"
@@ -156,7 +157,7 @@ func prepareTelegramRuntime(
 	}
 	updatesRecovery := updates.New(updates.Config{
 		Handler: updateHandler,
-		Logger:  lg.Named("updates.recovery"),
+		Logger:  logzap.New(lg.Named("updates.recovery")),
 		Storage: boltstor.NewStateStorage(boltdb),
 	})
 
@@ -166,7 +167,7 @@ func prepareTelegramRuntime(
 	})
 
 	clientOptions := telegram.Options{
-		Logger:         lg,
+		Logger:         logzap.New(lg),
 		SessionStorage: sessionStorage,
 		UpdateHandler:  updatesRecovery,
 		Middlewares: []telegram.Middleware{
