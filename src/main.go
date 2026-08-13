@@ -486,6 +486,15 @@ func prepareOptions() (options Options, err error) {
 		return options, errors.Wrap(err, "unmarshalling environment")
 	}
 	options.Env = environment
+	if err := validateThresholds("text", environment.Thresholds.Text, environment.Thresholds.TextMax); err != nil {
+		return options, err
+	}
+	if err := validateThresholds("photo", environment.Thresholds.Photo, environment.Thresholds.PhotoMax); err != nil {
+		return options, err
+	}
+	if err := validateThresholds("forward", environment.Thresholds.Forward, environment.Thresholds.ForwardMax); err != nil {
+		return options, err
+	}
 	if environment.ThresholdHistoryDays <= 0 {
 		return options, errors.New("threshold history days must be positive")
 	}
@@ -519,6 +528,17 @@ func prepareOptions() (options Options, err error) {
 	}
 
 	return options, nil
+}
+
+func validateThresholds(name string, minimum, maximum int) error {
+	if minimum < 0 || maximum < 0 {
+		return fmt.Errorf("%s thresholds must be non-negative", name)
+	}
+	if minimum > maximum {
+		return fmt.Errorf("%s minimum threshold must not exceed maximum threshold", name)
+	}
+
+	return nil
 }
 
 func main() {
