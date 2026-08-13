@@ -2,14 +2,14 @@
 
 :>
 
-Reactor is a user-bot that helps you discover the most popular memes and posts from any chat or channel. It tracks how many people react or reply to each message and sends the ones that reach a certain threshold to your channel. You can set the threshold and choose whether to use emoji or reply counts as criteria. With Reactor, you’ll never miss a viral meme again!
+Reactor monitors chats with your Telegram account, tracks reactions and positive replies, and forwards popular messages to your channel. A separate bot handles commands in monitored chats.
 
-# Features
+## Features
 
 - Monitor any chat or channel for reactions
 - Forward messages with enough replies/reactions to your channel
-- Customize the threshold for forwarding messages
-- Use emoji reactions or reply counts as criteria
+- Adapt thresholds per chat from recent message ratings
+- Reply with `/r` to see a recorded message's rating and threshold
 
 ## Installation
 
@@ -22,7 +22,7 @@ To install Reactor, you need to have [Go](https://golang.org/) installed on your
 
 ## Configuration
 
-Before running the bot, you need to create a configuration file named `scripts/env.bash` in `scripts` folder as the executable. The configuration file should have the following variables:
+Copy `scripts/env.bash.example` to `scripts/env.bash` and fill in the required values:
 
 ```bash
 export REACTOR_PHONE=""
@@ -35,14 +35,14 @@ export REACTOR_CHANNEL_ID=""
 export REACTOR_CHANNEL_ACCESS_HASH=""
 ```
 
-You can obtain your Telegram API ID and API hash from [here](https://my.telegram.org/apps). You can get your Telegram chat/channel ID by from updates or by using other bots.
+Get your Telegram API ID and hash from [my.telegram.org](https://my.telegram.org/apps). Create the command bot with @BotFather, set its token as `REACTOR_COMMAND_BOT_TOKEN`, and add it to every monitored chat. The phone-authenticated client monitors and forwards messages; the command bot responds to `/r` and `/help` (including `@BotUsername` mentions).
 
 ## Usage
 
 - [How to not get banned?](https://github.com/gotd/td/blob/main/.github/SUPPORT.md#how-to-not-get-banned)
 - <details>
     <summary>
-      How to change forward thresholds?
+      How do adaptive thresholds work?
     </summary>
     <code>
     export REACTOR_TEXT_THRESHOLD=31
@@ -55,6 +55,8 @@ You can obtain your Telegram API ID and API hash from [here](https://my.telegram
     export REACTOR_THRESHOLD_MATURITY_HOURS=6
     export REACTOR_TARGET_FORWARDS_PER_DAY=3
     </code>
+
+    Thresholds are recalculated hourly for each chat from mature messages in the history window. The minimum and maximum values bound each message category; the target controls the approximate number of forwards per day.
   </details>
 - <details>
     <summary>
