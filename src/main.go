@@ -247,8 +247,8 @@ func run(ctx context.Context, options Options, logger *zap.SugaredLogger) (err e
 	}
 	watcher := monitor.New(watcherOptions, botDB, userBot, logger)
 
-	userDispatcher.OnNewChannelMessage(func(ctx context.Context, e tg.Entities, u *tg.UpdateNewChannelMessage) error {
-		handlerCtx := HandlerContext{ctx: ctx, e: e, u: u, peerDB: userRuntime.peerDB, botDB: botDB, watcher: watcher}
+	userDispatcher.OnNewChannelMessage(func(ctx context.Context, _ tg.Entities, u *tg.UpdateNewChannelMessage) error {
+		handlerCtx := HandlerContext{ctx: ctx, u: u, peerDB: userRuntime.peerDB, botDB: botDB, watcher: watcher}
 		childLogger := logger.Named("channel_message_handler")
 		err := ChannelMessageHandler(handlerCtx, options, childLogger)
 		if err != nil {
@@ -426,10 +426,9 @@ func registerCommandHandlers(
 	options Options,
 	logger *zap.SugaredLogger,
 ) {
-	handler := func(ctx context.Context, e tg.Entities, msg tg.MessageClass) error {
+	handler := func(ctx context.Context, msg tg.MessageClass) error {
 		handlerCtx := CommandHandlerContext{
 			ctx:      ctx,
-			e:        e,
 			u:        msg,
 			peerDB:   peerDB,
 			watcher:  watcher,
@@ -445,12 +444,12 @@ func registerCommandHandlers(
 		return err
 	}
 
-	dispatcher.OnNewMessage(func(ctx context.Context, e tg.Entities, u *tg.UpdateNewMessage) error {
-		return handler(ctx, e, u.Message)
+	dispatcher.OnNewMessage(func(ctx context.Context, _ tg.Entities, u *tg.UpdateNewMessage) error {
+		return handler(ctx, u.Message)
 	})
 
-	dispatcher.OnNewChannelMessage(func(ctx context.Context, e tg.Entities, u *tg.UpdateNewChannelMessage) error {
-		return handler(ctx, e, u.Message)
+	dispatcher.OnNewChannelMessage(func(ctx context.Context, _ tg.Entities, u *tg.UpdateNewChannelMessage) error {
+		return handler(ctx, u.Message)
 	})
 }
 

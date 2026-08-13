@@ -19,7 +19,6 @@ import (
 
 type HandlerContext struct {
 	ctx     context.Context
-	e       tg.Entities
 	u       *tg.UpdateNewChannelMessage
 	peerDB  *pebble.PeerStorage
 	botDB   *sql.DB
@@ -69,7 +68,6 @@ func ChannelMessageHandler(req HandlerContext, options Options, logger *zap.Suga
 
 type CommandHandlerContext struct {
 	ctx      context.Context
-	e        tg.Entities
 	u        tg.MessageClass
 	peerDB   *pebble.PeerStorage
 	watcher  *monitor.Monitor
