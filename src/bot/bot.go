@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"go.uber.org/zap"
 	"math/rand"
@@ -9,10 +10,14 @@ import (
 
 	"github.com/go-faster/errors"
 	"github.com/gotd/td/telegram/message"
+	"github.com/gotd/td/telegram/message/styling"
 	"github.com/gotd/td/tg"
 	"github.com/gotd/td/tgerr"
 	"github.com/sleroq/reactor/src/db"
 )
+
+//go:embed help.ogg
+var helpVoice []byte
 
 // Part function splits slice on specified position
 func Part[T any](slice []T, length int) (new []T, modified []T) {
@@ -166,6 +171,43 @@ func (b Bot) Reply(e tg.Entities, u *tg.UpdateNewChannelMessage, text string) er
 	if err != nil {
 		fmt.Println(err)
 		return errors.Wrap(err, "sending reply")
+	}
+
+	return nil
+}
+
+func (b Bot) ReplyToPeer(peer tg.InputPeerClass, replyID int, text string) error {
+	sender := message.NewSender(b.api)
+	builder := sender.To(peer).CloneBuilder().Reply(replyID)
+	_, err := builder.Text(b.ctx, text)
+	if err != nil {
+		return errors.Wrap(err, "sending reply")
+	}
+
+	return nil
+}
+
+func (b Bot) ReplyRating(peer tg.InputPeerClass, replyID int, current, threshold int) error {
+	sender := message.NewSender(b.api)
+	builder := sender.To(peer).CloneBuilder().Reply(replyID)
+	_, err := builder.StyledText(
+		b.ctx,
+		styling.Bold(fmt.Sprintf("%d", current)),
+		styling.Plain(fmt.Sprintf(" / %d", threshold)),
+	)
+	if err != nil {
+		return errors.Wrap(err, "sending rating reply")
+	}
+
+	return nil
+}
+
+func (b Bot) ReplyHelp(peer tg.InputPeerClass, replyID int) error {
+	sender := message.NewSender(b.api)
+	builder := sender.To(peer).CloneBuilder().Reply(replyID)
+	_, err := builder.Upload(message.FromBytes("help.ogg", helpVoice)).Voice(b.ctx)
+	if err != nil {
+		return errors.Wrap(err, "sending help voice message")
 	}
 
 	return nil

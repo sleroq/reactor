@@ -5,13 +5,12 @@ import (
 	"database/sql"
 	"fmt"
 	"go.uber.org/zap"
+	"slices"
 	"sync"
 
 	"github.com/go-faster/errors"
 	"github.com/gotd/td/tg"
 	"github.com/sleroq/reactor/src/bot"
-	"golang.org/x/exp/slices"
-
 	"regexp"
 	"strings"
 	"time"
@@ -21,9 +20,12 @@ import (
 )
 
 type Thresholds struct {
-	Text    int
-	Photo   int
-	Forward int
+	Text       int
+	Photo      int
+	Forward    int
+	TextMax    int
+	PhotoMax   int
+	ForwardMax int
 }
 type Chats struct {
 	Sources      []tg.InputPeerChannel
@@ -31,21 +33,40 @@ type Chats struct {
 }
 
 type Options struct {
-	Thresholds       Thresholds
-	Chats            Chats
-	NoQuoteWhitelist []int64
+	Thresholds             Thresholds
+	ThresholdHistoryWindow time.Duration
+	ThresholdMaturityAge   time.Duration
+	TargetForwardsPerDay   int
+	Chats                  Chats
+	NoQuoteWhitelist       []int64
 }
 
 type Monitor struct {
-	db      *sql.DB
-	bot     *bot.Bot
-	options Options
-	mu      *sync.Mutex
-	logger  *zap.SugaredLogger
+	db              *sql.DB
+	bot             *bot.Bot
+	options         Options
+	mu              *sync.Mutex
+	thresholdsMu    *sync.Mutex
+	thresholdsCache map[int64]cachedThresholds
+	logger          *zap.SugaredLogger
 }
 
 const MsgReqDelay = 30 * time.Second
 const RecoveringDelay = 5 * time.Minute
+const thresholdCacheDuration = time.Hour
+
+type messageCategory int
+
+const (
+	textCategory messageCategory = iota
+	photoCategory
+	forwardCategory
+)
+
+type cachedThresholds struct {
+	values    map[messageCategory]int
+	expiresAt time.Time
+}
 
 var stopWordPattern = regexp.MustCompile(`(?i)(мяу)`)
 
@@ -56,6 +77,8 @@ func New(options Options, db *sql.DB, bot *bot.Bot, parentLogger *zap.SugaredLog
 		bot,
 		options,
 		&sync.Mutex{},
+		&sync.Mutex{},
+		make(map[int64]cachedThresholds),
 		logger,
 	}
 }
@@ -165,14 +188,11 @@ func (m Monitor) checkMessages(chat db.Chat, messages []db.Message) error {
 			return errors.Wrap(err, "rating message")
 		}
 
-		threshold := m.options.Thresholds.Forward
-		if msg.FwdFromChannel == 0 &&
-			msg.FwdFromUser == 0 {
-			threshold = m.options.Thresholds.Photo
+		thresholds, err := m.dynamicThresholds(chat.ID, time.Now())
+		if err != nil {
+			return errors.Wrap(err, "calculating dynamic thresholds")
 		}
-		if !msg.WithPhoto {
-			threshold = m.options.Thresholds.Text
-		}
+		threshold := thresholds[categoryOf(msg)]
 
 		if totalRating > threshold {
 			// Checking to see if message was edited
@@ -198,14 +218,11 @@ func (m Monitor) checkMessages(chat db.Chat, messages []db.Message) error {
 			)
 
 			noQuote := true
-			if slices.Contains(m.options.NoQuoteWhitelist, msg.FwdFromChannel) {
-				noQuote = false
-			}
-			if slices.Contains(m.options.NoQuoteWhitelist, msg.FwdFromUser) {
-				noQuote = false
-			}
-			if slices.Contains(m.options.NoQuoteWhitelist, msg.UserID) {
-				noQuote = false
+			for _, id := range m.options.NoQuoteWhitelist {
+				if id == msg.FwdFromChannel || id == msg.FwdFromUser || id == msg.UserID {
+					noQuote = false
+					break
+				}
 			}
 
 			messages := []db.Message{msg}
@@ -297,8 +314,23 @@ func (m Monitor) syncReactions(new tg.MessageReactions, msg db.Message, accessHa
 }
 
 func (m Monitor) rateMessage(reactions []db.Reaction, msg db.Message) (int, error) {
+	return m.rateMessageAt(reactions, msg, time.Time{})
+}
+
+func (m Monitor) rateMessageAt(reactions []db.Reaction, msg db.Message, cutoff time.Time) (int, error) {
+	replies, err := db.GetReplies(m.db, msg.ChatID, msg.ID)
+	if err != nil {
+		return 0, errors.Wrap(err, "getting replies from database")
+	}
+	return rateMessageWithReplies(reactions, replies, msg, cutoff)
+}
+
+func rateMessageWithReplies(reactions []db.Reaction, replies []db.Message, msg db.Message, cutoff time.Time) (int, error) {
 	usersReactions := make(map[int64]int)
 	for _, reaction := range reactions {
+		if !cutoff.IsZero() && reaction.SentDate.After(cutoff) {
+			continue
+		}
 		if _, ok := usersReactions[reaction.UserID]; !ok {
 			emotePositivity := 8 // FIXME: Hardcoded value
 
@@ -316,9 +348,10 @@ func (m Monitor) rateMessage(reactions []db.Reaction, msg db.Message) (int, erro
 		}
 	}
 
-	replies, err := db.GetReplies(m.db, msg.ChatID, msg.ID)
-	if err != nil {
-		return 0, errors.Wrap(err, "getting replies from database")
+	if !cutoff.IsZero() {
+		replies = slices.DeleteFunc(replies, func(reply db.Message) bool {
+			return reply.SentDate.After(cutoff)
+		})
 	}
 
 	positiveRepliedUsers, err := helpers.PositiveReplies(replies)
@@ -342,8 +375,7 @@ func (m Monitor) rateMessage(reactions []db.Reaction, msg db.Message) (int, erro
 	}
 
 	stopWordCount := 0
-	words := strings.Split(msg.Body, " ")
-	for _, word := range words {
+	for word := range strings.SplitSeq(msg.Body, " ") {
 		if stopWordPattern.MatchString(word) {
 			stopWordCount += 1
 		}
@@ -353,53 +385,155 @@ func (m Monitor) rateMessage(reactions []db.Reaction, msg db.Message) (int, erro
 	return totalRating, nil
 }
 
-func (m Monitor) ReplyMessageRating(
-	e tg.Entities,
-	u *tg.UpdateNewChannelMessage,
-	replyID int,
-	chat *tg.Channel,
-) error {
-	m.logger.Infof("replying with rating for message %d", replyID)
-
-	msg, err := db.GetMessage(m.db, chat.ID, replyID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			err = m.bot.Reply(e, u, "404")
-			if err != nil {
-				return errors.Wrap(err, "replying with 404")
-			}
-		}
-		return errors.Wrap(err, "getting saved message")
+func categoryOf(msg db.Message) messageCategory {
+	if msg.FwdFromChannel != 0 || msg.FwdFromUser != 0 {
+		return forwardCategory
 	}
+	if msg.WithPhoto {
+		return photoCategory
+	}
+	return textCategory
+}
+
+func (m Monitor) dynamicThresholds(chatID int64, now time.Time) (map[messageCategory]int, error) {
+	m.thresholdsMu.Lock()
+	defer m.thresholdsMu.Unlock()
+
+	if cached, ok := m.thresholdsCache[chatID]; ok && now.Before(cached.expiresAt) {
+		return cached.values, nil
+	}
+
+	messages, err := db.GetMessagesBetween(
+		m.db,
+		chatID,
+		now.Add(-m.options.ThresholdHistoryWindow-m.options.ThresholdMaturityAge),
+		now.Add(-m.options.ThresholdMaturityAge),
+	)
+	if err != nil {
+		return nil, errors.Wrap(err, "getting mature messages")
+	}
+	reactions, err := db.GetReactionsForMessagesBetween(
+		m.db,
+		chatID,
+		now.Add(-m.options.ThresholdHistoryWindow-m.options.ThresholdMaturityAge),
+		now.Add(-m.options.ThresholdMaturityAge),
+	)
+	if err != nil {
+		return nil, errors.Wrap(err, "getting reactions for mature messages")
+	}
+	replies, err := db.GetRepliesForMessagesBetween(
+		m.db,
+		chatID,
+		now.Add(-m.options.ThresholdHistoryWindow-m.options.ThresholdMaturityAge),
+		now.Add(-m.options.ThresholdMaturityAge),
+	)
+	if err != nil {
+		return nil, errors.Wrap(err, "getting replies for mature messages")
+	}
+
+	reactionsByMessage := make(map[int][]db.Reaction)
+	for _, reaction := range reactions {
+		reactionsByMessage[reaction.MessageID] = append(reactionsByMessage[reaction.MessageID], reaction)
+	}
+	repliesByMessage := make(map[int][]db.Message)
+	for _, reply := range replies {
+		repliesByMessage[reply.ReplyTo] = append(repliesByMessage[reply.ReplyTo], reply)
+	}
+
+	ratings := map[messageCategory][]int{
+		textCategory:    {},
+		photoCategory:   {},
+		forwardCategory: {},
+	}
+	for _, msg := range messages {
+		rating, err := rateMessageWithReplies(
+			reactionsByMessage[msg.ID],
+			repliesByMessage[msg.ID],
+			msg,
+			msg.SentDate.Add(m.options.ThresholdMaturityAge),
+		)
+		if err != nil {
+			return nil, errors.Wrap(err, "rating threshold sample")
+		}
+		category := categoryOf(msg)
+		ratings[category] = append(ratings[category], rating)
+	}
+
+	thresholds := make(map[messageCategory]int, 3)
+	targetCount := m.options.TargetForwardsPerDay * int(m.options.ThresholdHistoryWindow/(24*time.Hour))
+	thresholds[textCategory] = percentileThreshold(ratings[textCategory], len(messages), targetCount, m.options.Thresholds.Text, m.options.Thresholds.TextMax)
+	thresholds[photoCategory] = percentileThreshold(ratings[photoCategory], len(messages), targetCount, m.options.Thresholds.Photo, m.options.Thresholds.PhotoMax)
+	thresholds[forwardCategory] = percentileThreshold(ratings[forwardCategory], len(messages), targetCount, m.options.Thresholds.Forward, m.options.Thresholds.ForwardMax)
+
+	m.thresholdsCache[chatID] = cachedThresholds{values: thresholds, expiresAt: now.Add(thresholdCacheDuration)}
+	m.logger.Infow("calculated dynamic thresholds",
+		"chat_id", chatID,
+		"samples", len(messages),
+		"text", thresholds[textCategory],
+		"photo", thresholds[photoCategory],
+		"forward", thresholds[forwardCategory],
+	)
+	return thresholds, nil
+}
+
+func percentileThreshold(ratings []int, totalSamples, targetCount, minimum, maximum int) int {
+	if len(ratings) == 0 || totalSamples <= targetCount {
+		return minimum
+	}
+
+	slices.Sort(ratings)
+	// Use the same percentile for every category, so their expected forwards
+	// add up to the target rather than each category producing the target.
+	index := (len(ratings)*(totalSamples-targetCount) + totalSamples - 1) / totalSamples
+	index--
+	threshold := ratings[max(index, 0)]
+	return min(max(threshold, minimum), maximum)
+}
+
+func (m Monitor) MessageRating(chatID int64, messageID int) (rating, threshold int, err error) {
+	m.logger.Infof("calculating rating for message %d", messageID)
+
+	msg, err := db.GetMessage(m.db, chatID, messageID)
+	if err != nil {
+		return 0, 0, err
+	}
+	chats, err := db.GetOnlySavedChats([]tg.InputPeerChannel{{ChannelID: chatID}}, m.db)
+	if err != nil {
+		return 0, 0, errors.Wrap(err, "getting saved chat")
+	}
+	if len(chats) == 0 {
+		return 0, 0, sql.ErrNoRows
+	}
+	chat := chats[0]
 
 	msg, err = m.UpdateMessage(tg.InputChannel{
 		ChannelID:  chat.ID,
 		AccessHash: chat.AccessHash,
 	}, msg)
 	if err != nil {
-		return errors.Wrap(err, "updating message")
+		return 0, 0, errors.Wrap(err, "updating message")
 	}
 
 	reactionsList, err := m.bot.GetReactionsList(msg, chat.AccessHash)
 	if err != nil {
-		return errors.Wrap(err, "getting reactions list for a message")
+		return 0, 0, errors.Wrap(err, "getting reactions list for a message")
 	}
 	reactions, err := helpers.AsReactions(reactionsList.Reactions, msg.ChatID, msg.ID)
 	if err != nil {
-		return errors.Wrap(err, "converting reaction")
+		return 0, 0, errors.Wrap(err, "converting reaction")
 	}
 
 	totalRating, err := m.rateMessage(reactions, msg)
 	if err != nil {
-		return errors.Wrap(err, "rating message")
+		return 0, 0, errors.Wrap(err, "rating message")
 	}
 
-	err = m.bot.Reply(e, u, fmt.Sprint(totalRating))
+	thresholds, err := m.dynamicThresholds(chatID, time.Now())
 	if err != nil {
-		return errors.Wrap(err, "replying with rating")
+		return 0, 0, errors.Wrap(err, "calculating dynamic threshold")
 	}
 
-	return nil
+	return totalRating, thresholds[categoryOf(msg)], nil
 }
 
 func (m Monitor) checkForMissedMessages() error {

@@ -11,8 +11,8 @@ Reactor is a user-bot that helps you discover the most popular memes and posts f
 - Customize the threshold for forwarding messages
 - Use emoji reactions or reply counts as criteria
 
-
 ## Installation
+
 To install Reactor, you need to have [Go](https://golang.org/) installed on your system. Then, follow these steps:
 
 1. Clone this repository: `git clone https://github.com/sleroq/reactor.git`
@@ -23,10 +23,12 @@ To install Reactor, you need to have [Go](https://golang.org/) installed on your
 ## Configuration
 
 Before running the bot, you need to create a configuration file named `scripts/env.bash` in `scripts` folder as the executable. The configuration file should have the following variables:
+
 ```bash
 export REACTOR_PHONE=""
 export REACTOR_APP_ID=""
 export REACTOR_APP_HASH=""
+export REACTOR_COMMAND_BOT_TOKEN=""
 export REACTOR_SESSION_DIR=./session
 export REACTOR_CHAT_IDS="123123,23123"
 export REACTOR_CHANNEL_ID=""
@@ -44,8 +46,14 @@ You can obtain your Telegram API ID and API hash from [here](https://my.telegram
     </summary>
     <code>
     export REACTOR_TEXT_THRESHOLD=31
-  	export REACTOR_PHOTO_THRESHOLD=23
-  	export REACTOR_FORWARD_THRESHOLD=23
+    export REACTOR_PHOTO_THRESHOLD=23
+    export REACTOR_FORWARD_THRESHOLD=23
+    export REACTOR_TEXT_MAX_THRESHOLD=62
+    export REACTOR_PHOTO_MAX_THRESHOLD=46
+    export REACTOR_FORWARD_MAX_THRESHOLD=46
+    export REACTOR_THRESHOLD_HISTORY_DAYS=7
+    export REACTOR_THRESHOLD_MATURITY_HOURS=6
+    export REACTOR_TARGET_FORWARDS_PER_DAY=3
     </code>
   </details>
 - <details>

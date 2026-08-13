@@ -47,8 +47,7 @@ func sessionFolder(phone string) string {
 type Int64Slice []int64
 
 func (i *Int64Slice) UnmarshalEnvironmentValue(value string) error {
-	parts := strings.Split(value, ",")
-	for _, part := range parts {
+	for part := range strings.SplitSeq(value, ",") {
 		number, err := strconv.ParseInt(strings.TrimSpace(part), 10, 64)
 		if err != nil {
 			return err
@@ -60,10 +59,11 @@ func (i *Int64Slice) UnmarshalEnvironmentValue(value string) error {
 }
 
 type Environment struct {
-	Phone      string `env:"REACTOR_PHONE,required=true"`
-	AppID      int    `env:"REACTOR_APP_ID,required=true"`
-	AppHash    string `env:"REACTOR_APP_HASH,required=true"`
-	SessionDir string `env:"REACTOR_SESSION_DIR,required=true"`
+	Phone           string `env:"REACTOR_PHONE,required=true"`
+	AppID           int    `env:"REACTOR_APP_ID,required=true"`
+	AppHash         string `env:"REACTOR_APP_HASH,required=true"`
+	CommandBotToken string `env:"REACTOR_COMMAND_BOT_TOKEN,required=true"`
+	SessionDir      string `env:"REACTOR_SESSION_DIR,required=true"`
 
 	WatchedChatIDs          Int64Slice `env:"REACTOR_CHAT_IDS,required=true"`
 	DestChannelIDs          Int64Slice `env:"REACTOR_CHANNEL_ID,required=true"`
@@ -72,10 +72,16 @@ type Environment struct {
 	NoQuoteWhitelistIDs Int64Slice `env:"REACTOR_NOQUOTE_WHITELIST"`
 
 	Thresholds struct {
-		Text    int `env:"REACTOR_TEXT_THRESHOLD,default=31"`
-		Photo   int `env:"REACTOR_PHOTO_THRESHOLD,default=23"`
-		Forward int `env:"REACTOR_FORWARD_THRESHOLD,default=23"`
+		Text       int `env:"REACTOR_TEXT_THRESHOLD,default=31"`
+		Photo      int `env:"REACTOR_PHOTO_THRESHOLD,default=23"`
+		Forward    int `env:"REACTOR_FORWARD_THRESHOLD,default=23"`
+		TextMax    int `env:"REACTOR_TEXT_MAX_THRESHOLD,default=62"`
+		PhotoMax   int `env:"REACTOR_PHOTO_MAX_THRESHOLD,default=46"`
+		ForwardMax int `env:"REACTOR_FORWARD_MAX_THRESHOLD,default=46"`
 	}
+	ThresholdHistoryDays   int `env:"REACTOR_THRESHOLD_HISTORY_DAYS,default=7"`
+	ThresholdMaturityHours int `env:"REACTOR_THRESHOLD_MATURITY_HOURS,default=6"`
+	TargetForwardsPerDay   int `env:"REACTOR_TARGET_FORWARDS_PER_DAY,default=3"`
 
 	CheckFrequency struct {
 		Wide   int `env:"REACTOR_WIDE_FREQUENCY,default=180"`
@@ -116,76 +122,89 @@ func prepareInternalLogger(dir string) *zap.Logger {
 	return zap.New(logCore)
 }
 
-func run(ctx context.Context, options Options, logger *zap.SugaredLogger) (err error) {
-	// Setting up session storage.
-	// This is needed to reuse session and not login every time.
-	sessionDir := filepath.Join(options.Env.SessionDir, sessionFolder(options.Env.Phone))
-	if err := os.MkdirAll(sessionDir, 0700); err != nil {
-		return errors.Wrap(err, "create session dir")
-	}
+type TelegramRuntime struct {
+	client          *telegram.Client
+	api             *tg.Client
+	peerDB          *pebble.PeerStorage
+	updatesRecovery *updates.Manager
+	waiter          *floodwait.Waiter
+}
 
-	lg := prepareInternalLogger(sessionDir)
-	defer func() { _ = lg.Sync() }()
-
-	// So, we are storing session information in current directory, under subdirectory "session/phone_hash"
+func prepareTelegramRuntime(
+	appID int,
+	appHash string,
+	sessionDir string,
+	logger *zap.SugaredLogger,
+	lg *zap.Logger,
+	dispatcher tg.UpdateDispatcher,
+) (*TelegramRuntime, error) {
 	sessionStorage := &telegram.FileSessionStorage{
 		Path: filepath.Join(sessionDir, "session.json"),
 	}
-	// Peer storage, for resolve caching and short updates handling.
 	cacheDB, err := pebbledb.Open(filepath.Join(sessionDir, "peers.pebble.db"), &pebbledb.Options{})
 	if err != nil {
-		return errors.Wrap(err, "create pebble storage")
+		return nil, errors.Wrap(err, "create pebble storage")
 	}
 	peerDB := pebble.NewPeerStorage(cacheDB)
 	lg.Info("Storage", zap.String("path", sessionDir))
 
-	// Setting up client.
-	//
-	// Dispatcher is used to register handlers for events.
-	dispatcher := tg.NewUpdateDispatcher()
-	// Setting up update handler that will fill peer storage before
-	// calling dispatcher handlers.
 	updateHandler := storage.UpdateHook(dispatcher, peerDB)
 
-	// Setting up persistent storage for qts/pts to be able to
-	// recover after restart.
 	boltdb, err := bbolt.Open(filepath.Join(sessionDir, "updates.bolt.db"), 0666, nil)
 	if err != nil {
-		return errors.Wrap(err, "create bolt storage")
+		return nil, errors.Wrap(err, "create bolt storage")
 	}
 	updatesRecovery := updates.New(updates.Config{
-		Handler: updateHandler, // using previous handler with peerDB
+		Handler: updateHandler,
 		Logger:  lg.Named("updates.recovery"),
 		Storage: boltstor.NewStateStorage(boltdb),
 	})
 
-	// Handler of FLOOD_WAIT that will automatically retry request.
 	waiter := floodwait.NewWaiter().WithCallback(func(ctx context.Context, wait floodwait.FloodWait) {
-		// Notifying about flood wait.
 		lg.Warn("Flood wait", zap.Duration("wait", wait.Duration))
 		logger.Warn("Flood wait", zap.Duration("wait", wait.Duration))
 	})
 
-	// Filling client options.
 	clientOptions := telegram.Options{
-		Logger:         lg,              // Passing logger for observability.
-		SessionStorage: sessionStorage,  // Setting up session sessionStorage to store auth data.
-		UpdateHandler:  updatesRecovery, // Setting up handler for updates from server.
+		Logger:         lg,
+		SessionStorage: sessionStorage,
+		UpdateHandler:  updatesRecovery,
 		Middlewares: []telegram.Middleware{
-			// Setting up FLOOD_WAIT handler to automatically wait and retry request.
 			waiter,
-			// Setting up general rate limits to less likely get flood wait errors.
 			ratelimit.New(rate.Every(time.Millisecond*500), 5),
 		},
 	}
-	client := telegram.NewClient(options.Env.AppID, options.Env.AppHash, clientOptions)
+
+	client := telegram.NewClient(appID, appHash, clientOptions)
 	api := client.API()
+	_ = storage.NewResolverCache(peer.Plain(api), peerDB)
 
-	// Setting up resolver cache that will use peer storage.
-	resolver := storage.NewResolverCache(peer.Plain(api), peerDB)
-	_ = resolver
+	return &TelegramRuntime{
+		client:          client,
+		api:             api,
+		peerDB:          peerDB,
+		updatesRecovery: updatesRecovery,
+		waiter:          waiter,
+	}, nil
+}
 
-	// Setting up persistent storage for chats and messages
+func run(ctx context.Context, options Options, logger *zap.SugaredLogger) (err error) {
+	userSessionDir := filepath.Join(options.Env.SessionDir, sessionFolder(options.Env.Phone))
+	if err := os.MkdirAll(userSessionDir, 0700); err != nil {
+		return errors.Wrap(err, "create userbot session dir")
+	}
+
+	commandSessionDir := filepath.Join(options.Env.SessionDir, "command-bot")
+	if err := os.MkdirAll(commandSessionDir, 0700); err != nil {
+		return errors.Wrap(err, "create command bot session dir")
+	}
+
+	userInternalLogger := prepareInternalLogger(userSessionDir)
+	defer func() { _ = userInternalLogger.Sync() }()
+
+	commandInternalLogger := prepareInternalLogger(commandSessionDir)
+	defer func() { _ = commandInternalLogger.Sync() }()
+
 	botDB, err := db.SetupDB()
 	if err != nil {
 		return errors.Wrap(err, "setting up the database")
@@ -200,26 +219,36 @@ func run(ctx context.Context, options Options, logger *zap.SugaredLogger) (err e
 			}
 		}
 	}()
-	// Authentication flow handles authentication process, like prompting for code and 2FA password.
 
-	flow := auth.NewFlow(Terminal{PhoneNumber: options.Env.Phone}, auth.SendCodeOptions{})
+	userDispatcher := tg.NewUpdateDispatcher()
+	userRuntime, err := prepareTelegramRuntime(
+		options.Env.AppID,
+		options.Env.AppHash,
+		userSessionDir,
+		logger,
+		userInternalLogger,
+		userDispatcher,
+	)
+	if err != nil {
+		return errors.Wrap(err, "preparing userbot runtime")
+	}
 
-	bot := botWrapper.New(ctx, api)
-
+	userBot := botWrapper.New(ctx, userRuntime.api)
 	watcherOptions := monitor.Options{
-		Thresholds: monitor.Thresholds(options.Env.Thresholds),
+		Thresholds:             monitor.Thresholds(options.Env.Thresholds),
+		ThresholdHistoryWindow: time.Duration(options.Env.ThresholdHistoryDays) * 24 * time.Hour,
+		ThresholdMaturityAge:   time.Duration(options.Env.ThresholdMaturityHours) * time.Hour,
+		TargetForwardsPerDay:   options.Env.TargetForwardsPerDay,
 		Chats: monitor.Chats{
 			Sources:      options.ChatsToMonitor,
 			Destinations: options.DestChannels,
 		},
 		NoQuoteWhitelist: options.NoQuoteWhitelist,
 	}
+	watcher := monitor.New(watcherOptions, botDB, userBot, logger)
 
-	watcher := monitor.New(watcherOptions, botDB, bot, logger)
-
-	// Registering handler for new private messages in chats.
-	dispatcher.OnNewChannelMessage(func(ctx context.Context, e tg.Entities, u *tg.UpdateNewChannelMessage) error {
-		handlerCtx := HandlerContext{ctx: ctx, e: e, u: u, peerDB: peerDB, botDB: botDB, watcher: watcher}
+	userDispatcher.OnNewChannelMessage(func(ctx context.Context, _ tg.Entities, u *tg.UpdateNewChannelMessage) error {
+		handlerCtx := HandlerContext{ctx: ctx, u: u, peerDB: userRuntime.peerDB, botDB: botDB, watcher: watcher}
 		childLogger := logger.Named("channel_message_handler")
 		err := ChannelMessageHandler(handlerCtx, options, childLogger)
 		if err != nil {
@@ -228,22 +257,68 @@ func run(ctx context.Context, options Options, logger *zap.SugaredLogger) (err e
 		return err
 	})
 
-	return waiter.Run(ctx, func(ctx context.Context) error {
-		if err := client.Run(ctx, func(ctx context.Context) error {
-			// Perform auth if no session is available.
-			if err := client.Auth().IfNecessary(ctx, flow); err != nil {
+	commandDispatcher := tg.NewUpdateDispatcher()
+	commandRuntime, err := prepareTelegramRuntime(
+		options.Env.AppID,
+		options.Env.AppHash,
+		commandSessionDir,
+		logger,
+		commandInternalLogger,
+		commandDispatcher,
+	)
+	if err != nil {
+		return errors.Wrap(err, "preparing command bot runtime")
+	}
+
+	commandBot := botWrapper.New(ctx, commandRuntime.api)
+
+	errChan := make(chan error, 2)
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	go func() {
+		errChan <- runMonitoringClient(runCtx, userRuntime, watcher, options, userInternalLogger, logger)
+	}()
+
+	go func() {
+		errChan <- runCommandClient(runCtx, commandRuntime, commandDispatcher, watcher, commandBot, options, commandInternalLogger, logger)
+	}()
+
+	var firstErr error
+	for range 2 {
+		runErr := <-errChan
+		if runErr != nil && firstErr == nil {
+			firstErr = runErr
+			cancel()
+		}
+	}
+
+	return firstErr
+}
+
+func runMonitoringClient(
+	ctx context.Context,
+	runtime *TelegramRuntime,
+	watcher *monitor.Monitor,
+	options Options,
+	lg *zap.Logger,
+	logger *zap.SugaredLogger,
+) error {
+	flow := auth.NewFlow(Terminal{PhoneNumber: options.Env.Phone}, auth.SendCodeOptions{})
+
+	return runtime.waiter.Run(ctx, func(ctx context.Context) error {
+		if err := runtime.client.Run(ctx, func(ctx context.Context) error {
+			if err := runtime.client.Auth().IfNecessary(ctx, flow); err != nil {
 				return errors.Wrap(err, "auth")
 			}
 
-			// Getting info about current user.
-			self, err := client.Self(ctx)
+			self, err := runtime.client.Self(ctx)
 			if err != nil {
 				return errors.Wrap(err, "call self")
 			}
 
 			name := self.FirstName
 			if self.Username != "" {
-				// Username is optional.
 				name = fmt.Sprintf("%s (@%s)", name, self.Username)
 			}
 			logger.Info("Current user:", name)
@@ -256,7 +331,6 @@ func run(ctx context.Context, options Options, logger *zap.SugaredLogger) (err e
 			)
 
 			if options.Env.Recover {
-				// Handling missed messages
 				err = watcher.RecoverSync()
 				if err != nil {
 					return errors.Wrap(err, "recovering missed messages")
@@ -265,18 +339,131 @@ func run(ctx context.Context, options Options, logger *zap.SugaredLogger) (err e
 
 			startMonitoring(ctx, watcher, options)
 
-			return updatesRecovery.Run(ctx, api, self.ID, updates.AuthOptions{
+			return runtime.updatesRecovery.Run(ctx, runtime.api, self.ID, updates.AuthOptions{
 				IsBot: self.Bot,
 				OnStart: func(ctx context.Context) {
 					logger.Info("Update recovery initialized and started, listening for events")
 				},
 			})
 		}); err != nil {
-			return errors.Wrap(err, "run")
+			return errors.Wrap(err, "running monitoring client")
 		}
 
 		return nil
 	})
+}
+
+func runCommandClient(
+	ctx context.Context,
+	runtime *TelegramRuntime,
+	dispatcher tg.UpdateDispatcher,
+	watcher *monitor.Monitor,
+	commandBot *botWrapper.Bot,
+	options Options,
+	lg *zap.Logger,
+	logger *zap.SugaredLogger,
+) error {
+	return runtime.waiter.Run(ctx, func(ctx context.Context) error {
+		if err := runtime.client.Run(ctx, func(ctx context.Context) error {
+			status, err := runtime.client.Auth().Status(ctx)
+			if err != nil {
+				return errors.Wrap(err, "checking command bot auth status")
+			}
+
+			if !status.Authorized {
+				if _, err := runtime.client.Auth().Bot(ctx, options.Env.CommandBotToken); err != nil {
+					return errors.Wrap(err, "authorizing command bot")
+				}
+			}
+
+			self, err := runtime.client.Self(ctx)
+			if err != nil {
+				return errors.Wrap(err, "getting command bot self")
+			}
+			tokenBotID, err := commandBotID(options.Env.CommandBotToken)
+			if err != nil {
+				return errors.Wrap(err, "parsing command bot token")
+			}
+			if self.ID != tokenBotID {
+				return fmt.Errorf(
+					"command bot session belongs to @%s (%d), but configured token belongs to bot %d; remove %s and restart",
+					self.Username,
+					self.ID,
+					tokenBotID,
+					filepath.Join(options.Env.SessionDir, "command-bot"),
+				)
+			}
+
+			lg.Info("Login",
+				zap.String("first_name", self.FirstName),
+				zap.String("last_name", self.LastName),
+				zap.String("username", self.Username),
+				zap.Int64("id", self.ID),
+			)
+			logger.Infow("Command bot connected", "username", self.Username, "id", self.ID)
+			registerCommandHandlers(dispatcher, runtime.peerDB, watcher, commandBot, self.Username, options, logger)
+
+			return runtime.updatesRecovery.Run(ctx, runtime.api, self.ID, updates.AuthOptions{
+				IsBot: true,
+				OnStart: func(ctx context.Context) {
+					logger.Info("Command bot update recovery initialized and started")
+				},
+			})
+		}); err != nil {
+			return errors.Wrap(err, "running command bot client")
+		}
+
+		return nil
+	})
+}
+
+func registerCommandHandlers(
+	dispatcher tg.UpdateDispatcher,
+	peerDB *pebble.PeerStorage,
+	watcher *monitor.Monitor,
+	commandBot *botWrapper.Bot,
+	username string,
+	options Options,
+	logger *zap.SugaredLogger,
+) {
+	handler := func(ctx context.Context, msg tg.MessageClass) error {
+		handlerCtx := CommandHandlerContext{
+			ctx:      ctx,
+			u:        msg,
+			peerDB:   peerDB,
+			watcher:  watcher,
+			bot:      commandBot,
+			username: username,
+		}
+
+		err := CommandMessageHandler(handlerCtx, options, logger.Named("command_message_handler"))
+		if err != nil {
+			logger.Errorw("Error in command message handler", "error", err)
+		}
+
+		return err
+	}
+
+	dispatcher.OnNewMessage(func(ctx context.Context, _ tg.Entities, u *tg.UpdateNewMessage) error {
+		return handler(ctx, u.Message)
+	})
+
+	dispatcher.OnNewChannelMessage(func(ctx context.Context, _ tg.Entities, u *tg.UpdateNewChannelMessage) error {
+		return handler(ctx, u.Message)
+	})
+}
+
+func commandBotID(token string) (int64, error) {
+	id, _, ok := strings.Cut(token, ":")
+	if !ok {
+		return 0, errors.New("token has no separator")
+	}
+
+	botID, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		return 0, errors.Wrap(err, "parsing bot ID")
+	}
+	return botID, nil
 }
 
 func startMonitoring(ctx context.Context, watcher *monitor.Monitor, options Options) {
@@ -298,6 +485,24 @@ func prepareOptions() (options Options, err error) {
 		return options, errors.Wrap(err, "unmarshalling environment")
 	}
 	options.Env = environment
+	if err := validateThresholds("text", environment.Thresholds.Text, environment.Thresholds.TextMax); err != nil {
+		return options, err
+	}
+	if err := validateThresholds("photo", environment.Thresholds.Photo, environment.Thresholds.PhotoMax); err != nil {
+		return options, err
+	}
+	if err := validateThresholds("forward", environment.Thresholds.Forward, environment.Thresholds.ForwardMax); err != nil {
+		return options, err
+	}
+	if environment.ThresholdHistoryDays <= 0 {
+		return options, errors.New("threshold history days must be positive")
+	}
+	if environment.ThresholdMaturityHours <= 0 {
+		return options, errors.New("threshold maturity hours must be positive")
+	}
+	if environment.TargetForwardsPerDay <= 0 {
+		return options, errors.New("target forwards per day must be positive")
+	}
 
 	for _, chatID := range environment.WatchedChatIDs {
 		channel := tg.InputPeerChannel{
@@ -322,6 +527,17 @@ func prepareOptions() (options Options, err error) {
 	}
 
 	return options, nil
+}
+
+func validateThresholds(name string, minimum, maximum int) error {
+	if minimum < 0 || maximum < 0 {
+		return fmt.Errorf("%s thresholds must be non-negative", name)
+	}
+	if minimum > maximum {
+		return fmt.Errorf("%s minimum threshold must not exceed maximum threshold", name)
+	}
+
+	return nil
 }
 
 func main() {
