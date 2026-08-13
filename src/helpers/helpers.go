@@ -294,8 +294,8 @@ func FormatObject(input any) string {
 	if !ok {
 		// Handle tg.*Box values.
 		rv := reflect.Indirect(reflect.ValueOf(input))
-		for i := 0; i < rv.NumField(); i++ {
-			if v, ok := rv.Field(i).Interface().(tdp.Object); ok {
+		for _, field := range rv.Fields() {
+			if v, ok := field.Interface().(tdp.Object); ok {
 				return FormatObject(v)
 			}
 		}
