@@ -12,7 +12,6 @@ import (
 	"github.com/gotd/td/tg"
 	botWrapper "github.com/sleroq/reactor/src/bot"
 	"github.com/sleroq/reactor/src/db"
-	"github.com/sleroq/reactor/src/helpers"
 	"github.com/sleroq/reactor/src/monitor"
 	"go.uber.org/zap"
 )
@@ -133,8 +132,8 @@ func ratingCmd(req CommandHandlerContext, msg *tg.Message, channel *tg.Channel, 
 	case *tg.MessageReplyHeader: // messageReplyHeader#a6d57763
 		reply = v
 	case *tg.MessageReplyStoryHeader:
-		logger.Debug("story reply, ignoring %s", helpers.FormatObject(msg))
-		return fmt.Errorf("unexpected reply type: %T", v)
+		logger.Debugw("Ignoring rating command replying to a story", "story_id", v.StoryID)
+		return nil
 	default:
 		return fmt.Errorf("unexpected reply type: %T", v)
 	}

@@ -48,7 +48,7 @@ func SaveMessage(msg *tg.Message, chatID int64, db *sql.DB) (Message, error) {
 
 	hasPhoto := false
 	switch msg.Media.(type) {
-	case *tg.MessageMediaPhoto:
+	case *tg.MessageMediaPhoto, *tg.MessageMediaStory:
 		hasPhoto = true
 	}
 
@@ -58,8 +58,7 @@ func SaveMessage(msg *tg.Message, chatID int64, db *sql.DB) (Message, error) {
 		case *tg.MessageReplyHeader: // messageReplyHeader#a6d57763
 			replyID = v.ReplyToMsgID
 		case *tg.MessageReplyStoryHeader:
-			fmt.Println("fucking story?", v.GetStoryID(), v.GetPeer())
-			return Message{}, fmt.Errorf("unexpected reply type: %T", v)
+			// Story IDs are not message IDs, so they cannot be represented by replyTo.
 		default:
 			return Message{}, fmt.Errorf("unexpected reply type: %T", v)
 		}
