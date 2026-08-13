@@ -509,6 +509,13 @@ func SetupDB() (*sql.DB, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "creating messages table")
 	}
+	_, err = db.Exec(`
+		create index if not exists messages_chat_sent_date
+		on messages(chatId, sentDate);
+	`)
+	if err != nil {
+		return nil, errors.Wrap(err, "creating messages history index")
+	}
 
 	_, err = db.Exec(`
 		create table if not exists reactions (
@@ -525,6 +532,13 @@ func SetupDB() (*sql.DB, error) {
 	`)
 	if err != nil {
 		return nil, errors.Wrap(err, "creating reactions table")
+	}
+	_, err = db.Exec(`
+		create index if not exists reactions_chat_message
+		on reactions(chatId, messageId);
+	`)
+	if err != nil {
+		return nil, errors.Wrap(err, "creating reactions message index")
 	}
 
 	_, err = db.Exec(`
