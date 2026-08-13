@@ -51,6 +51,9 @@ You can obtain your Telegram API ID and API hash from [here](https://my.telegram
     export REACTOR_TEXT_MAX_THRESHOLD=62
     export REACTOR_PHOTO_MAX_THRESHOLD=46
     export REACTOR_FORWARD_MAX_THRESHOLD=46
+    export REACTOR_THRESHOLD_HISTORY_DAYS=7
+    export REACTOR_THRESHOLD_MATURITY_HOURS=6
+    export REACTOR_TARGET_FORWARDS_PER_DAY=3
     </code>
   </details>
 - <details>

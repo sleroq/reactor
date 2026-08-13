@@ -403,6 +403,11 @@ func GetSavedReactions(db *sql.DB, chatID int64, messageID int) ([]Reaction, err
 		reactions = append(reactions, reaction)
 	}
 
+	err = rows.Err()
+	if err != nil {
+		return nil, errors.Wrap(err, "querying reactions row for a message")
+	}
+
 	return reactions, nil
 }
 

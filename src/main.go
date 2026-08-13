@@ -79,6 +79,9 @@ type Environment struct {
 		PhotoMax   int `env:"REACTOR_PHOTO_MAX_THRESHOLD,default=46"`
 		ForwardMax int `env:"REACTOR_FORWARD_MAX_THRESHOLD,default=46"`
 	}
+	ThresholdHistoryDays   int `env:"REACTOR_THRESHOLD_HISTORY_DAYS,default=7"`
+	ThresholdMaturityHours int `env:"REACTOR_THRESHOLD_MATURITY_HOURS,default=6"`
+	TargetForwardsPerDay   int `env:"REACTOR_TARGET_FORWARDS_PER_DAY,default=3"`
 
 	CheckFrequency struct {
 		Wide   int `env:"REACTOR_WIDE_FREQUENCY,default=180"`
@@ -232,7 +235,10 @@ func run(ctx context.Context, options Options, logger *zap.SugaredLogger) (err e
 
 	userBot := botWrapper.New(ctx, userRuntime.api)
 	watcherOptions := monitor.Options{
-		Thresholds: monitor.Thresholds(options.Env.Thresholds),
+		Thresholds:             monitor.Thresholds(options.Env.Thresholds),
+		ThresholdHistoryWindow: time.Duration(options.Env.ThresholdHistoryDays) * 24 * time.Hour,
+		ThresholdMaturityAge:   time.Duration(options.Env.ThresholdMaturityHours) * time.Hour,
+		TargetForwardsPerDay:   options.Env.TargetForwardsPerDay,
 		Chats: monitor.Chats{
 			Sources:      options.ChatsToMonitor,
 			Destinations: options.DestChannels,
@@ -480,6 +486,15 @@ func prepareOptions() (options Options, err error) {
 		return options, errors.Wrap(err, "unmarshalling environment")
 	}
 	options.Env = environment
+	if environment.ThresholdHistoryDays <= 0 {
+		return options, errors.New("threshold history days must be positive")
+	}
+	if environment.ThresholdMaturityHours <= 0 {
+		return options, errors.New("threshold maturity hours must be positive")
+	}
+	if environment.TargetForwardsPerDay <= 0 {
+		return options, errors.New("target forwards per day must be positive")
+	}
 
 	for _, chatID := range environment.WatchedChatIDs {
 		channel := tg.InputPeerChannel{

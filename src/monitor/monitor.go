@@ -33,9 +33,12 @@ type Chats struct {
 }
 
 type Options struct {
-	Thresholds       Thresholds
-	Chats            Chats
-	NoQuoteWhitelist []int64
+	Thresholds             Thresholds
+	ThresholdHistoryWindow time.Duration
+	ThresholdMaturityAge   time.Duration
+	TargetForwardsPerDay   int
+	Chats                  Chats
+	NoQuoteWhitelist       []int64
 }
 
 type Monitor struct {
@@ -50,10 +53,7 @@ type Monitor struct {
 
 const MsgReqDelay = 30 * time.Second
 const RecoveringDelay = 5 * time.Minute
-const thresholdHistoryWindow = 7 * 24 * time.Hour
-const thresholdMaturityAge = 6 * time.Hour
 const thresholdCacheDuration = time.Hour
-const targetForwardsPerDay = 3
 
 type messageCategory int
 
@@ -406,8 +406,8 @@ func (m Monitor) dynamicThresholds(chatID int64, now time.Time) (map[messageCate
 	messages, err := db.GetMessagesBetween(
 		m.db,
 		chatID,
-		now.Add(-thresholdHistoryWindow-thresholdMaturityAge),
-		now.Add(-thresholdMaturityAge),
+		now.Add(-m.options.ThresholdHistoryWindow-m.options.ThresholdMaturityAge),
+		now.Add(-m.options.ThresholdMaturityAge),
 	)
 	if err != nil {
 		return nil, errors.Wrap(err, "getting mature messages")
@@ -415,8 +415,8 @@ func (m Monitor) dynamicThresholds(chatID int64, now time.Time) (map[messageCate
 	reactions, err := db.GetReactionsForMessagesBetween(
 		m.db,
 		chatID,
-		now.Add(-thresholdHistoryWindow-thresholdMaturityAge),
-		now.Add(-thresholdMaturityAge),
+		now.Add(-m.options.ThresholdHistoryWindow-m.options.ThresholdMaturityAge),
+		now.Add(-m.options.ThresholdMaturityAge),
 	)
 	if err != nil {
 		return nil, errors.Wrap(err, "getting reactions for mature messages")
@@ -424,8 +424,8 @@ func (m Monitor) dynamicThresholds(chatID int64, now time.Time) (map[messageCate
 	replies, err := db.GetRepliesForMessagesBetween(
 		m.db,
 		chatID,
-		now.Add(-thresholdHistoryWindow-thresholdMaturityAge),
-		now.Add(-thresholdMaturityAge),
+		now.Add(-m.options.ThresholdHistoryWindow-m.options.ThresholdMaturityAge),
+		now.Add(-m.options.ThresholdMaturityAge),
 	)
 	if err != nil {
 		return nil, errors.Wrap(err, "getting replies for mature messages")
@@ -450,7 +450,7 @@ func (m Monitor) dynamicThresholds(chatID int64, now time.Time) (map[messageCate
 			reactionsByMessage[msg.ID],
 			repliesByMessage[msg.ID],
 			msg,
-			msg.SentDate.Add(thresholdMaturityAge),
+			msg.SentDate.Add(m.options.ThresholdMaturityAge),
 		)
 		if err != nil {
 			return nil, errors.Wrap(err, "rating threshold sample")
@@ -460,7 +460,7 @@ func (m Monitor) dynamicThresholds(chatID int64, now time.Time) (map[messageCate
 	}
 
 	thresholds := make(map[messageCategory]int, 3)
-	targetCount := targetForwardsPerDay * int(thresholdHistoryWindow/(24*time.Hour))
+	targetCount := m.options.TargetForwardsPerDay * int(m.options.ThresholdHistoryWindow/(24*time.Hour))
 	thresholds[textCategory] = percentileThreshold(ratings[textCategory], len(messages), targetCount, m.options.Thresholds.Text, m.options.Thresholds.TextMax)
 	thresholds[photoCategory] = percentileThreshold(ratings[photoCategory], len(messages), targetCount, m.options.Thresholds.Photo, m.options.Thresholds.PhotoMax)
 	thresholds[forwardCategory] = percentileThreshold(ratings[forwardCategory], len(messages), targetCount, m.options.Thresholds.Forward, m.options.Thresholds.ForwardMax)
