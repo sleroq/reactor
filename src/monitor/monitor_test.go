@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"testing"
+	"time"
 
 	"github.com/sleroq/reactor/src/db"
 )
@@ -51,5 +52,22 @@ func TestPercentileThreshold(t *testing.T) {
 				t.Fatalf("percentileThreshold() = %d, want %d", got, test.want)
 			}
 		})
+	}
+}
+
+func TestRateMessageWithReplies_InitialSenderCanOptOut(t *testing.T) {
+	message := db.Message{UserID: 1, Body: "мяу"}
+	replies := []db.Message{
+		{UserID: 1, Body: "мяу"},
+		{UserID: 1, Body: "мяу мяу"},
+		{UserID: 2, Body: "мяу"},
+	}
+
+	rating, err := rateMessageWithReplies(nil, replies, message, time.Time{})
+	if err != nil {
+		t.Fatalf("rateMessageWithReplies() error = %v", err)
+	}
+	if rating != -40 {
+		t.Fatalf("rateMessageWithReplies() = %d, want -40", rating)
 	}
 }

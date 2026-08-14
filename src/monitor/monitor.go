@@ -374,15 +374,25 @@ func rateMessageWithReplies(reactions []db.Reaction, replies []db.Message, msg d
 		totalRating += reaction
 	}
 
-	stopWordCount := 0
-	for word := range strings.SplitSeq(msg.Body, " ") {
-		if stopWordPattern.MatchString(word) {
-			stopWordCount += 1
+	stopWordCount := countStopWords(msg.Body)
+	for _, reply := range replies {
+		if reply.UserID == msg.UserID {
+			stopWordCount += countStopWords(reply.Body)
 		}
 	}
 	totalRating += stopWordCount * -10
 
 	return totalRating, nil
+}
+
+func countStopWords(text string) int {
+	count := 0
+	for word := range strings.SplitSeq(text, " ") {
+		if stopWordPattern.MatchString(word) {
+			count++
+		}
+	}
+	return count
 }
 
 func categoryOf(msg db.Message) messageCategory {
