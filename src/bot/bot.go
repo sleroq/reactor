@@ -109,6 +109,34 @@ func (b Bot) GetReactions(chatId int64, accessHash int64, messages []int) ([]*tg
 	return reactionUpdates, nil
 }
 
+// GetCustomEmoji returns the base emoji associated with each custom emoji document.
+func (b Bot) GetCustomEmoji(documentIDs []int64) (map[int64]string, error) {
+	customEmoji := make(map[int64]string)
+	if len(documentIDs) == 0 {
+		return customEmoji, nil
+	}
+
+	documents, err := b.api.MessagesGetCustomEmojiDocuments(b.ctx, documentIDs)
+	if err != nil {
+		return nil, errors.Wrap(err, "getting custom emoji documents")
+	}
+
+	for _, document := range documents {
+		doc, ok := document.(*tg.Document)
+		if !ok {
+			continue
+		}
+		for _, attribute := range doc.Attributes {
+			if custom, ok := attribute.(*tg.DocumentAttributeCustomEmoji); ok {
+				customEmoji[doc.ID] = custom.Alt
+				break
+			}
+		}
+	}
+
+	return customEmoji, nil
+}
+
 func (b Bot) GetMessagesReactions(chat db.Chat, messages []db.Message, delay time.Duration, logger *zap.SugaredLogger) (
 	reactions []*tg.UpdateMessageReactions,
 	err error,

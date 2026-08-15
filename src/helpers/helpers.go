@@ -248,7 +248,7 @@ func PositiveReplies(messages []db.Message) (map[int64]string, error) {
 	return replies, nil
 }
 
-func AsReactions(tgReactions []tg.MessagePeerReaction, chatID int64, messageID int) ([]db.Reaction, error) {
+func AsReactions(tgReactions []tg.MessagePeerReaction, customEmoji map[int64]string, chatID int64, messageID int) ([]db.Reaction, error) {
 	var reactions []db.Reaction
 	for _, tgReaction := range tgReactions {
 		sentDate := time.Unix(int64(tgReaction.Date), 0)
@@ -268,6 +268,7 @@ func AsReactions(tgReactions []tg.MessagePeerReaction, chatID int64, messageID i
 			emoticon = r.GetEmoticon()
 		case *tg.ReactionCustomEmoji:
 			documentId = r.GetDocumentID()
+			emoticon = customEmoji[documentId]
 		default:
 			return nil, fmt.Errorf("unexpected reaction type: %s", tgReaction.String())
 		}

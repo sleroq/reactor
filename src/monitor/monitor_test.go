@@ -71,3 +71,17 @@ func TestRateMessageWithReplies_InitialSenderCanOptOut(t *testing.T) {
 		t.Fatalf("rateMessageWithReplies() = %d, want -40", rating)
 	}
 }
+
+func TestRateMessageWithReplies_CustomEmojiWithNegativeBaseEmoji(t *testing.T) {
+	rating, err := rateMessageWithReplies([]db.Reaction{{
+		UserID:     1,
+		DocumentID: 42,
+		Emoticon:   "👎",
+	}}, nil, db.Message{}, time.Time{})
+	if err != nil {
+		t.Fatalf("rateMessageWithReplies() error = %v", err)
+	}
+	if rating != -8 {
+		t.Fatalf("rateMessageWithReplies() = %d, want -8", rating)
+	}
+}
