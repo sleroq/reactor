@@ -30,12 +30,15 @@ func Part[T any](slice []T, length int) (new []T, modified []T) {
 type Bot struct {
 	ctx context.Context
 	api *tg.Client
+
+	emojiCache *customEmojiCache
 }
 
 func New(ctx context.Context, api *tg.Client) *Bot {
 	return &Bot{
-		ctx: ctx,
-		api: api,
+		ctx:        ctx,
+		api:        api,
+		emojiCache: newCustomEmojiCache(),
 	}
 }
 

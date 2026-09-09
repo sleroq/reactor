@@ -284,7 +284,7 @@ func (m Monitor) syncReactions(new tg.MessageReactions, msg db.Message, accessHa
 	// Check if we can trust "recent reactions"
 	// If so - save recent reactions
 	if len(new.RecentReactions) == totalReactions {
-		reactions, err = helpers.AsReactions(new.RecentReactions, msg.ChatID, msg.ID)
+		reactions, err = m.asReactions(new.RecentReactions, msg)
 		if err != nil {
 			return nil, errors.Wrap(err, "converting reaction")
 		}
@@ -300,7 +300,7 @@ func (m Monitor) syncReactions(new tg.MessageReactions, msg db.Message, accessHa
 			return nil, errors.Wrap(err, "getting reactions list from telegram")
 		}
 
-		reactions, err = helpers.AsReactions(reactionsList.Reactions, msg.ChatID, msg.ID)
+		reactions, err = m.asReactions(reactionsList.Reactions, msg)
 		if err != nil {
 			return nil, errors.Wrap(err, "converting reaction")
 		}
@@ -311,6 +311,26 @@ func (m Monitor) syncReactions(new tg.MessageReactions, msg db.Message, accessHa
 		}
 	}
 
+	return reactions, nil
+}
+
+func (m Monitor) asReactions(tgReactions []tg.MessagePeerReaction, msg db.Message) ([]db.Reaction, error) {
+	documentIDs := make([]int64, 0)
+	for _, reaction := range tgReactions {
+		if custom, ok := reaction.Reaction.(*tg.ReactionCustomEmoji); ok {
+			documentIDs = append(documentIDs, custom.DocumentID)
+		}
+	}
+
+	customEmoji, err := m.bot.GetCustomEmoji(documentIDs)
+	if err != nil {
+		return nil, errors.Wrap(err, "getting custom emoji")
+	}
+
+	reactions, err := helpers.AsReactions(tgReactions, customEmoji, msg.ChatID, msg.ID)
+	if err != nil {
+		return nil, errors.Wrap(err, "converting reaction")
+	}
 	return reactions, nil
 }
 
@@ -333,17 +353,16 @@ func rateMessageWithReplies(reactions []db.Reaction, replies []db.Message, msg d
 			continue
 		}
 		if _, ok := usersReactions[reaction.UserID]; !ok {
-			emotePositivity := 8 // FIXME: Hardcoded value
-
-			if reaction.DocumentID != 0 {
-				usersReactions[reaction.UserID] = emotePositivity
-				continue
-			}
-
-			emotePositivity, err := helpers.ReactionPositivity(reaction.Emoticon)
-			if err != nil {
-				fmt.Println("error getting reaction positivity:", err, "for message id:", msg.ID)
-				emotePositivity = 1
+			emotePositivity := 8
+			if reaction.DocumentID == 0 {
+				var err error
+				emotePositivity, err = helpers.ReactionPositivity(reaction.Emoticon)
+				if err != nil {
+					fmt.Println("error getting reaction positivity:", err, "for message id:", msg.ID)
+					emotePositivity = 1
+				}
+			} else if positivity, err := helpers.ReactionPositivity(reaction.Emoticon); err == nil && positivity < 0 {
+				emotePositivity = positivity
 			}
 			usersReactions[reaction.UserID] = emotePositivity
 		}
@@ -536,7 +555,7 @@ func (m Monitor) MessageRating(chatID int64, messageID int) (rating, threshold i
 	if err != nil {
 		return 0, 0, errors.Wrap(err, "getting reactions list for a message")
 	}
-	reactions, err := helpers.AsReactions(reactionsList.Reactions, msg.ChatID, msg.ID)
+	reactions, err := m.asReactions(reactionsList.Reactions, msg)
 	if err != nil {
 		return 0, 0, errors.Wrap(err, "converting reaction")
 	}
