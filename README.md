@@ -51,12 +51,13 @@ Get your Telegram API ID and hash from [my.telegram.org](https://my.telegram.org
     export REACTOR_TEXT_MAX_THRESHOLD=62
     export REACTOR_PHOTO_MAX_THRESHOLD=46
     export REACTOR_FORWARD_MAX_THRESHOLD=46
+    export REACTOR_TEXT_THRESHOLD_INCREASE_PERCENT=15
     export REACTOR_THRESHOLD_HISTORY_DAYS=7
     export REACTOR_THRESHOLD_MATURITY_HOURS=6
     export REACTOR_TARGET_FORWARDS_PER_DAY=3
     </code>
 
-    Thresholds are recalculated hourly for each chat from mature messages in the history window. The minimum and maximum values bound each message category; the target controls the approximate number of forwards per day.
+    Thresholds are recalculated hourly for each chat from mature messages in the history window. The minimum and maximum values bound each message category; `REACTOR_TEXT_THRESHOLD_INCREASE_PERCENT` keeps the text threshold above photo and forwarded-message thresholds. The target controls the approximate number of forwards per day.
   </details>
 - <details>
     <summary>
