@@ -11,6 +11,8 @@ Reactor monitors chats with your Telegram account, tracks reactions and positive
 - Adapt thresholds per chat from recent message ratings
 - Reply with `/r` to see a recorded message's rating and threshold
 
+> Shared Telegram Stories are forwarded as Story references, so Telegram keeps their original authorship. They are not reposted as plain media because that would lose the Story's interactive elements.
+
 ## Installation
 
 To install Reactor, you need to have [Go](https://golang.org/) installed on your system. Then, follow these steps:
