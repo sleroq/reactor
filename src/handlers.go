@@ -10,7 +10,6 @@ import (
 	"github.com/gotd/contrib/pebble"
 	"github.com/gotd/contrib/storage"
 	"github.com/gotd/td/tg"
-	botWrapper "github.com/sleroq/reactor/src/bot"
 	"github.com/sleroq/reactor/src/db"
 	"github.com/sleroq/reactor/src/monitor"
 	"go.uber.org/zap"
@@ -70,8 +69,15 @@ type CommandHandlerContext struct {
 	u        tg.MessageClass
 	peerDB   *pebble.PeerStorage
 	watcher  *monitor.Monitor
-	bot      *botWrapper.Bot
+	bot      commandBot
 	username string
+}
+
+// commandBot is the subset of Telegram operations needed by command handlers.
+type commandBot interface {
+	ReplyHelp(tg.InputPeerClass, int) error
+	ReplyRating(tg.InputPeerClass, int, int, int) error
+	ReplyToPeer(tg.InputPeerClass, int, string) error
 }
 
 func CommandMessageHandler(req CommandHandlerContext, options Options, logger *zap.SugaredLogger) (err error) {

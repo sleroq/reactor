@@ -10,7 +10,6 @@ import (
 
 	"github.com/go-faster/errors"
 	"github.com/gotd/td/tg"
-	"github.com/sleroq/reactor/src/bot"
 	"regexp"
 	"strings"
 	"time"
@@ -32,6 +31,16 @@ type Chats struct {
 	Destinations []tg.InputPeerClass
 }
 
+// telegramClient is the subset of Telegram operations required to monitor chats.
+type telegramClient interface {
+	ForwardMessages(db.Chat, tg.InputPeerClass, []db.Message, bool) error
+	GetCustomEmoji([]int64) (map[int64]string, error)
+	GetHistory(int64, int64, int, int) ([]tg.MessageClass, error)
+	GetMessageText(tg.InputChannel, int) (string, error)
+	GetMessagesReactions(db.Chat, []db.Message, time.Duration, *zap.SugaredLogger) ([]*tg.UpdateMessageReactions, error)
+	GetReactionsList(db.Message, int64) (*tg.MessagesMessageReactionsList, error)
+}
+
 type Options struct {
 	Thresholds             Thresholds
 	ThresholdHistoryWindow time.Duration
@@ -43,7 +52,7 @@ type Options struct {
 
 type Monitor struct {
 	db              *sql.DB
-	bot             *bot.Bot
+	bot             telegramClient
 	options         Options
 	mu              *sync.Mutex
 	thresholdsMu    *sync.Mutex
@@ -70,7 +79,7 @@ type cachedThresholds struct {
 
 var stopWordPattern = regexp.MustCompile(`(?i)(мяу)`)
 
-func New(options Options, db *sql.DB, bot *bot.Bot, parentLogger *zap.SugaredLogger) *Monitor {
+func New(options Options, db *sql.DB, bot telegramClient, parentLogger *zap.SugaredLogger) *Monitor {
 	logger := parentLogger.Named("monitor")
 	return &Monitor{
 		db,
