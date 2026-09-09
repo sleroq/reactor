@@ -73,12 +73,13 @@ type Environment struct {
 	NoQuoteWhitelistIDs Int64Slice `env:"REACTOR_NOQUOTE_WHITELIST"`
 
 	Thresholds struct {
-		Text       int `env:"REACTOR_TEXT_THRESHOLD,default=31"`
-		Photo      int `env:"REACTOR_PHOTO_THRESHOLD,default=23"`
-		Forward    int `env:"REACTOR_FORWARD_THRESHOLD,default=23"`
-		TextMax    int `env:"REACTOR_TEXT_MAX_THRESHOLD,default=62"`
-		PhotoMax   int `env:"REACTOR_PHOTO_MAX_THRESHOLD,default=46"`
-		ForwardMax int `env:"REACTOR_FORWARD_MAX_THRESHOLD,default=46"`
+		Text                int `env:"REACTOR_TEXT_THRESHOLD,default=31"`
+		Photo               int `env:"REACTOR_PHOTO_THRESHOLD,default=23"`
+		Forward             int `env:"REACTOR_FORWARD_THRESHOLD,default=23"`
+		TextMax             int `env:"REACTOR_TEXT_MAX_THRESHOLD,default=62"`
+		PhotoMax            int `env:"REACTOR_PHOTO_MAX_THRESHOLD,default=46"`
+		ForwardMax          int `env:"REACTOR_FORWARD_MAX_THRESHOLD,default=46"`
+		TextIncreasePercent int `env:"REACTOR_TEXT_THRESHOLD_INCREASE_PERCENT,default=15"`
 	}
 	ThresholdHistoryDays   int `env:"REACTOR_THRESHOLD_HISTORY_DAYS,default=7"`
 	ThresholdMaturityHours int `env:"REACTOR_THRESHOLD_MATURITY_HOURS,default=6"`
@@ -495,6 +496,13 @@ func prepareOptions() (options Options, err error) {
 	if err := validateThresholds("forward", environment.Thresholds.Forward, environment.Thresholds.ForwardMax); err != nil {
 		return options, err
 	}
+	if environment.Thresholds.TextIncreasePercent < 0 {
+		return options, errors.New("text threshold increase percent must be non-negative")
+	}
+	maximumMediaThreshold := max(environment.Thresholds.PhotoMax, environment.Thresholds.ForwardMax)
+	if environment.Thresholds.TextMax < thresholdWithIncrease(maximumMediaThreshold, environment.Thresholds.TextIncreasePercent) {
+		return options, fmt.Errorf("text maximum threshold must be at least %d%% higher than photo and forward maximum thresholds", environment.Thresholds.TextIncreasePercent)
+	}
 	if environment.ThresholdHistoryDays <= 0 {
 		return options, errors.New("threshold history days must be positive")
 	}
@@ -539,6 +547,10 @@ func validateThresholds(name string, minimum, maximum int) error {
 	}
 
 	return nil
+}
+
+func thresholdWithIncrease(threshold, increasePercent int) int {
+	return (threshold*(100+increasePercent) + 99) / 100
 }
 
 func main() {

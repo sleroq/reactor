@@ -55,6 +55,27 @@ func TestPercentileThreshold(t *testing.T) {
 	}
 }
 
+func TestTextThresholdMinimum(t *testing.T) {
+	tests := map[string]struct {
+		threshold       int
+		increasePercent int
+		want            int
+	}{
+		"zero":                   {threshold: 0, increasePercent: 15, want: 0},
+		"rounds up":              {threshold: 23, increasePercent: 15, want: 27},
+		"exact default increase": {threshold: 40, increasePercent: 15, want: 46},
+		"configured increase":    {threshold: 40, increasePercent: 25, want: 50},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := textThresholdMinimum(test.threshold, test.increasePercent); got != test.want {
+				t.Fatalf("textThresholdMinimum(%d, %d) = %d, want %d", test.threshold, test.increasePercent, got, test.want)
+			}
+		})
+	}
+}
+
 func TestRateMessageWithReplies_InitialSenderCanOptOut(t *testing.T) {
 	message := db.Message{UserID: 1, Body: "мяу"}
 	replies := []db.Message{
