@@ -36,13 +36,14 @@
         with lib;
         let
           cfg = config.services.reactor;
-        in {
+        in
+        {
           options.services.reactor = {
             enable = mkEnableOption "Reactor Telegram Bot";
 
             package = mkOption {
               type = types.package;
-              default = buildReactor pkgs;
+              default = self.packages.${pkgs.stdenv.hostPlatform.system}.reactor;
               description = "The reactor package to use";
             };
 
@@ -136,10 +137,10 @@
             gopls
             gotools
             go-tools
-            
+
             git
             gnumake
-            
+
             sqlite
           ];
 
