@@ -64,11 +64,12 @@ func (i *Int64Slice) UnmarshalEnvironmentValue(value string) error {
 }
 
 type Environment struct {
-	Phone           string `env:"REACTOR_PHONE"`
-	AppID           int    `env:"REACTOR_APP_ID,required=true"`
-	AppHash         string `env:"REACTOR_APP_HASH,required=true"`
-	CommandBotToken string `env:"REACTOR_COMMAND_BOT_TOKEN,required=true"`
-	SessionDir      string `env:"REACTOR_SESSION_DIR,required=true"`
+	Phone             string `env:"REACTOR_PHONE"`
+	TwoFactorPassword string `env:"REACTOR_2FA_PASSWORD"`
+	AppID             int    `env:"REACTOR_APP_ID,required=true"`
+	AppHash           string `env:"REACTOR_APP_HASH,required=true"`
+	CommandBotToken   string `env:"REACTOR_COMMAND_BOT_TOKEN,required=true"`
+	SessionDir        string `env:"REACTOR_SESSION_DIR,required=true"`
 
 	WatchedChatIDs          Int64Slice `env:"REACTOR_CHAT_IDS,required=true"`
 	DestChannelIDs          Int64Slice `env:"REACTOR_CHANNEL_ID,required=true"`
@@ -337,7 +338,7 @@ func runMonitoringClient(
 ) error {
 	return runtime.waiter.Run(ctx, func(ctx context.Context) error {
 		if err := runtime.client.Run(ctx, func(ctx context.Context) error {
-			if err := authViaQR(ctx, runtime.client, runtime.loggedIn, logger); err != nil {
+			if err := authViaQR(ctx, runtime.client, runtime.loggedIn, options.Env.TwoFactorPassword, logger); err != nil {
 				return errors.Wrap(err, "auth")
 			}
 
