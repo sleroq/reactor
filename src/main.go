@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -131,9 +132,18 @@ type TelegramRuntime struct {
 	client          *telegram.Client
 	api             *tg.Client
 	peerDB          *pebble.PeerStorage
+	peersDB         *pebbledb.DB
+	updatesDB       *bbolt.DB
 	updatesRecovery *updates.Manager
 	waiter          *floodwait.Waiter
 	loggedIn        qrlogin.LoggedIn
+}
+
+func (r *TelegramRuntime) Close() error {
+	return errors.Join(
+		errors.Wrap(r.updatesDB.Close(), "close updates storage"),
+		errors.Wrap(r.peersDB.Close(), "close peer storage"),
+	)
 }
 
 func prepareTelegramRuntime(
@@ -158,7 +168,10 @@ func prepareTelegramRuntime(
 
 	boltdb, err := bbolt.Open(filepath.Join(sessionDir, "updates.bolt.db"), 0666, nil)
 	if err != nil {
-		return nil, errors.Wrap(err, "create bolt storage")
+		return nil, errors.Join(
+			errors.Wrap(err, "create bolt storage"),
+			errors.Wrap(cacheDB.Close(), "close peer storage"),
+		)
 	}
 	updatesRecovery := updates.New(updates.Config{
 		Handler: updateHandler,
@@ -189,6 +202,8 @@ func prepareTelegramRuntime(
 		client:          client,
 		api:             api,
 		peerDB:          peerDB,
+		peersDB:         cacheDB,
+		updatesDB:       boltdb,
 		updatesRecovery: updatesRecovery,
 		waiter:          waiter,
 	}, nil
@@ -238,6 +253,9 @@ func run(ctx context.Context, options Options, logger *zap.SugaredLogger) (err e
 	if err != nil {
 		return errors.Wrap(err, "preparing userbot runtime")
 	}
+	defer func() {
+		err = errors.Join(err, errors.Wrap(userRuntime.Close(), "close userbot runtime"))
+	}()
 	userRuntime.loggedIn = qrlogin.OnLoginToken(userDispatcher)
 
 	userBot := botWrapper.New(ctx, userRuntime.api)
@@ -276,6 +294,9 @@ func run(ctx context.Context, options Options, logger *zap.SugaredLogger) (err e
 	if err != nil {
 		return errors.Wrap(err, "preparing command bot runtime")
 	}
+	defer func() {
+		err = errors.Join(err, errors.Wrap(commandRuntime.Close(), "close command bot runtime"))
+	}()
 
 	commandBot := botWrapper.New(ctx, commandRuntime.api)
 
@@ -300,6 +321,9 @@ func run(ctx context.Context, options Options, logger *zap.SugaredLogger) (err e
 		}
 	}
 
+	if errors.Is(firstErr, context.Canceled) && ctx.Err() == context.Canceled {
+		return nil
+	}
 	return firstErr
 }
 
@@ -568,9 +592,11 @@ func main() {
 		logger.Fatal(err)
 	}
 
-	ctx := context.Background()
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
 
 	if err := run(ctx, options, logger); err != nil {
 		logger.Fatal("Error", zap.Error(err))
 	}
+	logger.Info("Closed")
 }
