@@ -20,7 +20,7 @@ import (
 	"github.com/gotd/contrib/storage"
 	"github.com/gotd/log/logzap"
 	"github.com/gotd/td/telegram"
-	"github.com/gotd/td/telegram/auth"
+	"github.com/gotd/td/telegram/auth/qrlogin"
 	"github.com/gotd/td/telegram/message/peer"
 	"github.com/gotd/td/telegram/updates"
 	"github.com/gotd/td/tg"
@@ -42,6 +42,9 @@ func sessionFolder(phone string) string {
 			out = append(out, r)
 		}
 	}
+	if len(out) == 0 {
+		return "qr"
+	}
 	return "phone-" + string(out)
 }
 
@@ -60,7 +63,7 @@ func (i *Int64Slice) UnmarshalEnvironmentValue(value string) error {
 }
 
 type Environment struct {
-	Phone           string `env:"REACTOR_PHONE,required=true"`
+	Phone           string `env:"REACTOR_PHONE"`
 	AppID           int    `env:"REACTOR_APP_ID,required=true"`
 	AppHash         string `env:"REACTOR_APP_HASH,required=true"`
 	CommandBotToken string `env:"REACTOR_COMMAND_BOT_TOKEN,required=true"`
@@ -130,6 +133,7 @@ type TelegramRuntime struct {
 	peerDB          *pebble.PeerStorage
 	updatesRecovery *updates.Manager
 	waiter          *floodwait.Waiter
+	loggedIn        qrlogin.LoggedIn
 }
 
 func prepareTelegramRuntime(
@@ -234,6 +238,7 @@ func run(ctx context.Context, options Options, logger *zap.SugaredLogger) (err e
 	if err != nil {
 		return errors.Wrap(err, "preparing userbot runtime")
 	}
+	userRuntime.loggedIn = qrlogin.OnLoginToken(userDispatcher)
 
 	userBot := botWrapper.New(ctx, userRuntime.api)
 	watcherOptions := monitor.Options{
@@ -306,11 +311,9 @@ func runMonitoringClient(
 	lg *zap.Logger,
 	logger *zap.SugaredLogger,
 ) error {
-	flow := auth.NewFlow(Terminal{PhoneNumber: options.Env.Phone}, auth.SendCodeOptions{})
-
 	return runtime.waiter.Run(ctx, func(ctx context.Context) error {
 		if err := runtime.client.Run(ctx, func(ctx context.Context) error {
-			if err := runtime.client.Auth().IfNecessary(ctx, flow); err != nil {
+			if err := authViaQR(ctx, runtime.client, runtime.loggedIn, logger); err != nil {
 				return errors.Wrap(err, "auth")
 			}
 
