@@ -14,7 +14,7 @@
 
         src = ./.;
 
-        vendorHash = "sha256-IuEv8wA9eoNtUvCkK85KheVexrb4w6beQMXPaj9w84A=";
+        vendorHash = "sha256-WtKouz2AT6G/bN0xVnLKqkYvh7YPtZnsF61GkLsBaek=";
 
         subPackages = [ "src" ];
 
