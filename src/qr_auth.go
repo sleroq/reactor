@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/gotd/td/telegram"
@@ -73,9 +72,16 @@ func renderQRCode(token qrlogin.Token, output *os.File) error {
 	return nil
 }
 
-func promptPassword() (string, error) {
+func twoFactorPassword(configured string) (string, error) {
+	if configured != "" {
+		return configured, nil
+	}
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return "", fmt.Errorf("REACTOR_2FA_PASSWORD is required when stdin is not a terminal")
+	}
+
 	fmt.Print("Enter 2FA password: ")
-	password, err := term.ReadPassword(syscall.Stdin)
+	password, err := term.ReadPassword(int(os.Stdin.Fd()))
 	fmt.Println()
 	if err != nil {
 		return "", err
@@ -84,7 +90,13 @@ func promptPassword() (string, error) {
 	return strings.TrimSpace(string(password)), nil
 }
 
-func authViaQR(ctx context.Context, client *telegram.Client, loggedIn qrlogin.LoggedIn, logger *zap.SugaredLogger) error {
+func authViaQR(
+	ctx context.Context,
+	client *telegram.Client,
+	loggedIn qrlogin.LoggedIn,
+	twoFactorPasswordConfig string,
+	logger *zap.SugaredLogger,
+) error {
 	status, err := client.Auth().Status(ctx)
 	if err != nil {
 		return fmt.Errorf("check authorization: %w", err)
@@ -112,7 +124,7 @@ func authViaQR(ctx context.Context, client *telegram.Client, loggedIn qrlogin.Lo
 	})
 	if err != nil {
 		if tgerr.Is(err, "SESSION_PASSWORD_NEEDED") {
-			password, promptErr := promptPassword()
+			password, promptErr := twoFactorPassword(twoFactorPasswordConfig)
 			if promptErr != nil {
 				return fmt.Errorf("read 2FA password: %w", promptErr)
 			}

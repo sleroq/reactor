@@ -29,6 +29,7 @@ Copy `scripts/env.bash.example` to `scripts/env.bash` and fill in the required v
 ```bash
 export REACTOR_APP_ID=""
 export REACTOR_APP_HASH=""
+export REACTOR_2FA_PASSWORD=""
 export REACTOR_COMMAND_BOT_TOKEN=""
 export REACTOR_SESSION_DIR=./session
 export REACTOR_CHAT_IDS="123123,23123"
@@ -36,7 +37,7 @@ export REACTOR_CHANNEL_ID=""
 export REACTOR_CHANNEL_ACCESS_HASH=""
 ```
 
-Get your Telegram API ID and hash from [my.telegram.org](https://my.telegram.org/apps). On first launch, scan the displayed QR code in Telegram under **Settings → Devices → Link Desktop Device**. Create the command bot with @BotFather, set its token as `REACTOR_COMMAND_BOT_TOKEN`, and add it to every monitored chat. The user client monitors and forwards messages; the command bot responds to `/r` and `/help` (including `@BotUsername` mentions).
+Get your Telegram API ID and hash from [my.telegram.org](https://my.telegram.org/apps). On first launch, scan the displayed QR code in Telegram under **Settings → Devices → Link Desktop Device**. If Telegram 2FA is enabled and Reactor runs without an interactive terminal (for example, as a systemd service), set `REACTOR_2FA_PASSWORD`; interactive runs prompt when it is omitted. Create the command bot with @BotFather, set its token as `REACTOR_COMMAND_BOT_TOKEN`, and add it to every monitored chat. The user client monitors and forwards messages; the command bot responds to `/r` and `/help` (including `@BotUsername` mentions).
 
 ## Usage
 
