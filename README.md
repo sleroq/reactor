@@ -27,7 +27,6 @@ To install Reactor, you need to have [Go](https://golang.org/) installed on your
 Copy `scripts/env.bash.example` to `scripts/env.bash` and fill in the required values:
 
 ```bash
-export REACTOR_PHONE=""
 export REACTOR_APP_ID=""
 export REACTOR_APP_HASH=""
 export REACTOR_COMMAND_BOT_TOKEN=""
@@ -37,7 +36,7 @@ export REACTOR_CHANNEL_ID=""
 export REACTOR_CHANNEL_ACCESS_HASH=""
 ```
 
-Get your Telegram API ID and hash from [my.telegram.org](https://my.telegram.org/apps). Create the command bot with @BotFather, set its token as `REACTOR_COMMAND_BOT_TOKEN`, and add it to every monitored chat. The phone-authenticated client monitors and forwards messages; the command bot responds to `/r` and `/help` (including `@BotUsername` mentions).
+Get your Telegram API ID and hash from [my.telegram.org](https://my.telegram.org/apps). On first launch, scan the displayed QR code in Telegram under **Settings → Devices → Link Desktop Device**. Create the command bot with @BotFather, set its token as `REACTOR_COMMAND_BOT_TOKEN`, and add it to every monitored chat. The user client monitors and forwards messages; the command bot responds to `/r` and `/help` (including `@BotUsername` mentions).
 
 ## Usage
 
