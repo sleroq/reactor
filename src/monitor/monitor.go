@@ -19,12 +19,13 @@ import (
 )
 
 type Thresholds struct {
-	Text       int
-	Photo      int
-	Forward    int
-	TextMax    int
-	PhotoMax   int
-	ForwardMax int
+	Text                int
+	Photo               int
+	Forward             int
+	TextMax             int
+	PhotoMax            int
+	ForwardMax          int
+	TextIncreasePercent int
 }
 type Chats struct {
 	Sources      []tg.InputPeerChannel
@@ -503,6 +504,8 @@ func (m Monitor) dynamicThresholds(chatID int64, now time.Time) (map[messageCate
 	thresholds[photoCategory] = percentileThreshold(ratings[photoCategory], len(messages), targetCount, m.options.Thresholds.Photo, m.options.Thresholds.PhotoMax)
 	thresholds[forwardCategory] = percentileThreshold(ratings[forwardCategory], len(messages), targetCount, m.options.Thresholds.Forward, m.options.Thresholds.ForwardMax)
 
+	thresholds[textCategory] = max(thresholds[textCategory], textThresholdMinimum(thresholds[photoCategory], m.options.Thresholds.TextIncreasePercent), textThresholdMinimum(thresholds[forwardCategory], m.options.Thresholds.TextIncreasePercent))
+
 	m.thresholdsCache[chatID] = cachedThresholds{values: thresholds, expiresAt: now.Add(thresholdCacheDuration)}
 	m.logger.Infow("calculated dynamic thresholds",
 		"chat_id", chatID,
@@ -526,6 +529,11 @@ func percentileThreshold(ratings []int, totalSamples, targetCount, minimum, maxi
 	index--
 	threshold := ratings[max(index, 0)]
 	return min(max(threshold, minimum), maximum)
+}
+
+// textThresholdMinimum rounds up so the text threshold is at least increasePercent higher.
+func textThresholdMinimum(threshold, increasePercent int) int {
+	return (threshold*(100+increasePercent) + 99) / 100
 }
 
 func (m Monitor) MessageRating(chatID int64, messageID int) (rating, threshold int, err error) {
