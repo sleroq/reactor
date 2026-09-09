@@ -81,6 +81,7 @@ var ratingTable = map[string]int{
 	"🗿":     -1,
 	"🙉":     -2,
 	"😘":     9,
+	"😍":     9,
 	"🦄":     4,
 	"💊":     -4,
 	"🙊":     -2,
@@ -296,7 +297,7 @@ func FormatObject(input any) string {
 		// Handle tg.*Box values.
 		rv := reflect.Indirect(reflect.ValueOf(input))
 		for _, field := range rv.Fields() {
-			if v, ok := field.Interface().(tdp.Object); ok {
+			if v, ok := reflect.TypeAssert[tdp.Object](field); ok {
 				return FormatObject(v)
 			}
 		}
