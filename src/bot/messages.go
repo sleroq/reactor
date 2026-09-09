@@ -31,18 +31,18 @@ func (b *Bot) GetMessageText(chat tg.InputChannel, msgID int) (string, error) {
 	return msg.Message, nil
 }
 
-func (b *Bot) GetHistory(chatID, accessHash int64, limit, offsetID int) ([]tg.MessageClass, error) {
-	messages, err := b.api.MessagesGetHistory(b.ctx, &tg.MessagesGetHistoryRequest{
-		Peer:       &tg.InputPeerChannel{ChannelID: chatID, AccessHash: accessHash},
-		Limit:      limit,
-		OffsetID:   offsetID,
-		OffsetDate: 0,
-		MinID:      0,
-		MaxID:      0,
-		Hash:       0,
+func (b *Bot) GetMessages(chatID, accessHash int64, messageIDs []int) ([]tg.MessageClass, error) {
+	ids := make([]tg.InputMessageClass, 0, len(messageIDs))
+	for _, messageID := range messageIDs {
+		ids = append(ids, &tg.InputMessageID{ID: messageID})
+	}
+
+	messages, err := b.api.ChannelsGetMessages(b.ctx, &tg.ChannelsGetMessagesRequest{
+		Channel: &tg.InputChannel{ChannelID: chatID, AccessHash: accessHash},
+		ID:      ids,
 	})
 	if err != nil {
-		return nil, errors.Wrap(err, "getting messages from telegram")
+		return nil, errors.Wrap(err, "getting channel messages from telegram")
 	}
 
 	switch messages := messages.(type) {

@@ -36,7 +36,7 @@ type Chats struct {
 type telegramClient interface {
 	ForwardMessages(db.Chat, tg.InputPeerClass, []db.Message, bool) error
 	GetCustomEmoji([]int64) (map[int64]string, error)
-	GetHistory(int64, int64, int, int) ([]tg.MessageClass, error)
+	GetMessages(int64, int64, []int) ([]tg.MessageClass, error)
 	GetMessageText(tg.InputChannel, int) (string, error)
 	GetMessagesReactions(db.Chat, []db.Message, time.Duration, *zap.SugaredLogger) ([]*tg.UpdateMessageReactions, error)
 	GetReactionsList(db.Message, int64) (*tg.MessagesMessageReactionsList, error)
@@ -600,27 +600,22 @@ func (m Monitor) checkForMissedMessages() error {
 		logger.Debugf("missing ranges: %v", missingRanges)
 
 		for _, missingRange := range missingRanges {
-			start := missingRange[0]
-			limit := missingRange[1] - missingRange[0] + 1
+			count := missingRange[1] - missingRange[0] + 1
 
-			logger.Debugf("start: %d, limit: %d", start, limit)
+			logger.Debugf("start: %d, count: %d", missingRange[0], count)
 
-			// Split range into multiple calls if limit is larger than 100
-			for offset := start; offset < start+limit; offset += 100 {
-				logger.Debugf("checking missing range: %v with offset: %d", missingRange, offset)
+			// Telegram accepts at most 100 message IDs per call.
+			for _, messageIDs := range messageIDBatches(missingRange) {
+				batchStart := messageIDs[0]
+				batchEnd := messageIDs[len(messageIDs)-1]
+				logger.Debugf("checking missing range: %v with message IDs: %d-%d", missingRange, batchStart, batchEnd)
 
-				// Calculate the actual limit for this call based on remaining messages
-				var callLimit int
-				if remaining := start + limit - offset; remaining < 100 {
-					callLimit = remaining
-				} else {
-					callLimit = 100
-
+				if len(messageIDs) == 100 {
 					logger.Debugf("sleeping for %s, to make recovering slow", RecoveringDelay)
 					time.Sleep(RecoveringDelay)
 				}
 
-				part, err := m.bot.GetHistory(chat.ID, chat.AccessHash, callLimit, offset)
+				part, err := m.bot.GetMessages(chat.ID, chat.AccessHash, messageIDs)
 				if err != nil {
 					return errors.Wrap(err, "getting messages")
 				}
@@ -644,12 +639,6 @@ func (m Monitor) checkForMissedMessages() error {
 						return errors.New("unexpected message type")
 					}
 
-					// If message is not in missing range - skip it
-					if message.ID < missingRange[0] || message.ID > missingRange[1] {
-						logger.Warn("skipping message, because it's not in missing range (how?):", message.ID)
-						continue
-					}
-
 					// Save message
 					dbMessage, err := db.SaveMessage(message, chat.ID, m.db)
 					if err != nil {
@@ -669,7 +658,7 @@ func (m Monitor) checkForMissedMessages() error {
 				return errors.Wrap(err, "marking range as checked")
 			}
 
-			logger.Infof("finished checking missing range with %d messages", limit)
+			logger.Infof("finished checking missing range with %d messages", count)
 
 			logger.Debugf("sleeping for %s, to make recovering slow", RecoveringDelay)
 			time.Sleep(RecoveringDelay)
@@ -677,4 +666,17 @@ func (m Monitor) checkForMissedMessages() error {
 	}
 
 	return nil
+}
+
+func messageIDBatches(messageRange [2]int) [][]int {
+	batches := make([][]int, 0, (messageRange[1]-messageRange[0])/100+1)
+	for batchStart := messageRange[0]; batchStart <= messageRange[1]; batchStart += 100 {
+		batchEnd := min(batchStart+99, messageRange[1])
+		ids := make([]int, 0, batchEnd-batchStart+1)
+		for id := batchStart; id <= batchEnd; id++ {
+			ids = append(ids, id)
+		}
+		batches = append(batches, ids)
+	}
+	return batches
 }
