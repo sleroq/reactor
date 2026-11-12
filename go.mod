@@ -8,13 +8,13 @@ require (
 	github.com/go-faster/errors v0.8.0
 	github.com/gotd/contrib v0.25.0
 	github.com/gotd/log/logzap v0.1.1
-	github.com/gotd/td v0.161.0
-	github.com/mattn/go-sqlite3 v1.14.49
-	github.com/yeqown/go-qrcode/v2 v2.2.5
+	github.com/gotd/td v0.163.0
+	github.com/mattn/go-sqlite3 v1.14.53
+	github.com/yeqown/go-qrcode/v2 v2.3.0
 	go.etcd.io/bbolt v1.5.0
 	go.uber.org/zap v1.28.0
-	golang.org/x/term v0.45.0
-	golang.org/x/time v0.15.0
+	golang.org/x/term v0.47.0
+	golang.org/x/time v0.16.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 )
 
@@ -71,7 +71,7 @@ require (
 	golang.org/x/mod v0.40.0 // indirect
 	golang.org/x/net v0.58.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
 	golang.org/x/tools v0.49.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
